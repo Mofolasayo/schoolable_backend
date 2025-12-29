@@ -31,3 +31,18 @@ resend:
   apiKey: ${RESEND_API_KEY:}
   from: ${RESEND_FROM:no-reply@schoolable.local}
   verifyLinkBase: ${RESEND_VERIFY_LINK_BASE:http://localhost:8081/auth/verify-link?token=}
+
+# Cloudinary configuration for file storage
+# Get your credentials from https://cloudinary.com/console
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+
+# File upload limits
+spring:
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 15MB

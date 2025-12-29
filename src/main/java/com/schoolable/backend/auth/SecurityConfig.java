@@ -58,10 +58,13 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
-                                "/swagger-ui.html"
+                                "/swagger-ui.html",
+                                "/ws/**",
+                                "/ws-native/**"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/verify-link", "/auth/debug").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/verify-link").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/storage/status").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/login", "/auth/signup", "/auth/verify-email", "/auth/resend-verification").permitAll()
                         .anyRequest().authenticated()
                 )
