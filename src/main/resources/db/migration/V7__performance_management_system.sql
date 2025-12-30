@@ -144,17 +144,8 @@ CREATE TABLE employee_aura (
         END
     ) STORED,
     
-    -- Performance Grade (derived from CGPA)
-    current_grade VARCHAR(1) GENERATED ALWAYS AS (
-        CASE 
-            WHEN current_cgpa IS NULL THEN NULL
-            WHEN current_cgpa >= 4.30 THEN 'A'
-            WHEN current_cgpa >= 3.80 THEN 'B'
-            WHEN current_cgpa >= 3.30 THEN 'C'
-            WHEN current_cgpa >= 2.50 THEN 'D'
-            ELSE 'F'
-        END
-    ) STORED,
+    -- Performance Grade (regular column - updated by trigger or application)
+    current_grade VARCHAR(1),
     
     -- Promotion Eligibility Flags (updated by scheduled job)
     is_fast_track_eligible BOOLEAN DEFAULT false,
@@ -172,6 +163,27 @@ CREATE TABLE employee_aura (
     -- One record per employee per year
     UNIQUE(employee_id, year)
 );
+
+-- Trigger to automatically update current_grade when CGPA changes
+CREATE OR REPLACE FUNCTION update_employee_aura_grade()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.current_grade := CASE 
+        WHEN NEW.current_cgpa IS NULL THEN NULL
+        WHEN NEW.current_cgpa >= 4.30 THEN 'A'
+        WHEN NEW.current_cgpa >= 3.80 THEN 'B'
+        WHEN NEW.current_cgpa >= 3.30 THEN 'C'
+        WHEN NEW.current_cgpa >= 2.50 THEN 'D'
+        ELSE 'F'
+    END;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_aura_grade
+    BEFORE INSERT OR UPDATE ON employee_aura
+    FOR EACH ROW
+    EXECUTE FUNCTION update_employee_aura_grade();
 
 -- Indexes for employee aura
 CREATE INDEX idx_employee_aura_employee ON employee_aura(employee_id);
