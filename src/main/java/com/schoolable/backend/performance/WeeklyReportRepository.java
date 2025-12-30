@@ -82,4 +82,10 @@ public interface WeeklyReportRepository extends JpaRepository<WeeklyPerformanceR
         ORDER BY quarter
         """, nativeQuery = true)
     List<Object[]> getQuarterlyAggregation(@Param("employeeId") UUID employeeId, @Param("year") Integer year);
+
+    // Find reports for an employee after a specific date (for current quarter)
+    List<WeeklyPerformanceReport> findByEmployeeIdAndWeekStartDateAfter(UUID employeeId, java.time.LocalDate startDate);
+
+    // Find reports by reviewer after a date
+    List<WeeklyPerformanceReport> findByReviewerIdAndWeekStartDateAfter(UUID reviewerId, java.time.LocalDate startDate);
 }

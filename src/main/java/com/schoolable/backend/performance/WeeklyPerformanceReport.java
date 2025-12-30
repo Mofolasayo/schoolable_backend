@@ -69,6 +69,19 @@ public class WeeklyPerformanceReport {
     @Column(name = "areas_for_focus", columnDefinition = "TEXT")
     private String areasForFocus;
 
+    // NEW: Simplified Team Lead Ratings (V11 migration)
+    @Column(name = "teamwork_collaboration_score")
+    private Integer teamworkCollaborationScore;
+
+    @Column(name = "initiative_score")
+    private Integer initiativeScore;
+
+    @Column(name = "attitude_towards_work_score")
+    private Integer attitudeTowardsWorkScore;
+
+    @Column(name = "team_report_url")
+    private String teamReportUrl;
+
     // Calculated (auto-generated in DB)
     @Column(name = "weekly_aura", precision = 5, scale = 2, insertable = false, updatable = false)
     private BigDecimal weeklyAura;
@@ -152,4 +165,17 @@ public class WeeklyPerformanceReport {
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
+
+    // New simplified rating getters/setters
+    public Integer getTeamworkCollaborationScore() { return teamworkCollaborationScore; }
+    public void setTeamworkCollaborationScore(Integer teamworkCollaborationScore) { this.teamworkCollaborationScore = teamworkCollaborationScore; }
+
+    public Integer getInitiativeScore() { return initiativeScore; }
+    public void setInitiativeScore(Integer initiativeScore) { this.initiativeScore = initiativeScore; }
+
+    public Integer getAttitudeTowardsWorkScore() { return attitudeTowardsWorkScore; }
+    public void setAttitudeTowardsWorkScore(Integer attitudeTowardsWorkScore) { this.attitudeTowardsWorkScore = attitudeTowardsWorkScore; }
+
+    public String getTeamReportUrl() { return teamReportUrl; }
+    public void setTeamReportUrl(String teamReportUrl) { this.teamReportUrl = teamReportUrl; }
 }

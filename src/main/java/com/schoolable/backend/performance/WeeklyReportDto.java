@@ -325,4 +325,126 @@ public class WeeklyReportDto {
         public Long getTeamsReported() { return teamsReported; }
         public void setTeamsReported(Long teamsReported) { this.teamsReported = teamsReported; }
     }
+
+    /**
+     * SIMPLIFIED: Request for submitting the 3 team lead ratings only
+     * Used by Team Lead dashboard
+     */
+    public static class SimplifiedRatingRequest {
+        
+        @NotNull(message = "Employee ID is required")
+        private String employeeId;
+
+        @NotNull(message = "Week number is required")
+        @Min(1) @Max(53)
+        private Integer weekNumber;
+
+        @NotNull(message = "Year is required")
+        private Integer year;
+
+        // Only 3 ratings
+        @NotNull @Min(1) @Max(5)
+        private Integer teamworkCollaborationScore;
+
+        @NotNull @Min(1) @Max(5)
+        private Integer initiativeScore;
+
+        @NotNull @Min(1) @Max(5)
+        private Integer attitudeTowardsWorkScore;
+
+        // Optional notes
+        private String notes;
+
+        // Getters & Setters
+        public String getEmployeeId() { return employeeId; }
+        public void setEmployeeId(String employeeId) { this.employeeId = employeeId; }
+
+        public Integer getWeekNumber() { return weekNumber; }
+        public void setWeekNumber(Integer weekNumber) { this.weekNumber = weekNumber; }
+
+        public Integer getYear() { return year; }
+        public void setYear(Integer year) { this.year = year; }
+
+        public Integer getTeamworkCollaborationScore() { return teamworkCollaborationScore; }
+        public void setTeamworkCollaborationScore(Integer teamworkCollaborationScore) { this.teamworkCollaborationScore = teamworkCollaborationScore; }
+
+        public Integer getInitiativeScore() { return initiativeScore; }
+        public void setInitiativeScore(Integer initiativeScore) { this.initiativeScore = initiativeScore; }
+
+        public Integer getAttitudeTowardsWorkScore() { return attitudeTowardsWorkScore; }
+        public void setAttitudeTowardsWorkScore(Integer attitudeTowardsWorkScore) { this.attitudeTowardsWorkScore = attitudeTowardsWorkScore; }
+
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
+    }
+
+    /**
+     * SIMPLIFIED: Batch request for all team members (3 ratings each)
+     */
+    public static class SimplifiedBatchRequest {
+        
+        @NotNull(message = "Week number is required")
+        @Min(1) @Max(53)
+        private Integer weekNumber;
+
+        @NotNull(message = "Year is required")
+        private Integer year;
+
+        // Optional team report document URL
+        private String teamReportUrl;
+
+        @NotEmpty(message = "At least one report is required")
+        private List<SimplifiedTeamMemberRating> ratings;
+
+        public Integer getWeekNumber() { return weekNumber; }
+        public void setWeekNumber(Integer weekNumber) { this.weekNumber = weekNumber; }
+
+        public Integer getYear() { return year; }
+        public void setYear(Integer year) { this.year = year; }
+
+        public String getTeamReportUrl() { return teamReportUrl; }
+        public void setTeamReportUrl(String teamReportUrl) { this.teamReportUrl = teamReportUrl; }
+
+        public List<SimplifiedTeamMemberRating> getRatings() { return ratings; }
+        public void setRatings(List<SimplifiedTeamMemberRating> ratings) { this.ratings = ratings; }
+    }
+
+    /**
+     * Individual simplified rating within batch
+     */
+    public static class SimplifiedTeamMemberRating {
+        
+        @NotNull private String employeeId;
+        private String employeeName;
+
+        @NotNull @Min(1) @Max(5)
+        private Integer teamworkCollaborationScore;
+
+        @NotNull @Min(1) @Max(5)
+        private Integer initiativeScore;
+
+        @NotNull @Min(1) @Max(5)
+        private Integer attitudeTowardsWorkScore;
+
+        private String notes;
+
+        public String getEmployeeId() { return employeeId; }
+        public void setEmployeeId(String employeeId) { this.employeeId = employeeId; }
+
+        public String getEmployeeName() { return employeeName; }
+        public void setEmployeeName(String employeeName) { this.employeeName = employeeName; }
+
+        public Integer getTeamworkCollaborationScore() { return teamworkCollaborationScore; }
+        public void setTeamworkCollaborationScore(Integer score) { this.teamworkCollaborationScore = score; }
+
+        public Integer getInitiativeScore() { return initiativeScore; }
+        public void setInitiativeScore(Integer score) { this.initiativeScore = score; }
+
+        public Integer getAttitudeTowardsWorkScore() { return attitudeTowardsWorkScore; }
+        public void setAttitudeTowardsWorkScore(Integer score) { this.attitudeTowardsWorkScore = score; }
+
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
+    }
 }
+

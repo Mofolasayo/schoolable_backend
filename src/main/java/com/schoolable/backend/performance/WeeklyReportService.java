@@ -123,6 +123,80 @@ public class WeeklyReportService {
     }
 
     /**
+     * Submit SIMPLIFIED reports (3 ratings only) for all team members in a week
+     * Used by the Team Lead dashboard
+     */
+    @Transactional
+    public List<WeeklyReportDto.ReportResponse> submitSimplifiedReports(UUID teamLeadId, WeeklyReportDto.SimplifiedBatchRequest request) {
+        Profile teamLead = profileRepository.findById(teamLeadId)
+                .orElseThrow(() -> new RuntimeException("Team lead not found"));
+
+        if (!Boolean.TRUE.equals(teamLead.getIsTeamLead())) {
+            throw new RuntimeException("Only team leads can submit weekly reports");
+        }
+
+        // Calculate week dates
+        LocalDate weekStart = getWeekStartDate(request.getYear(), request.getWeekNumber());
+        LocalDate weekEnd = weekStart.plusDays(6);
+
+        List<WeeklyReportDto.ReportResponse> responses = new ArrayList<>();
+
+        for (WeeklyReportDto.SimplifiedTeamMemberRating rating : request.getRatings()) {
+            try {
+                UUID employeeId = UUID.fromString(rating.getEmployeeId());
+
+                // Check for existing report
+                Optional<WeeklyPerformanceReport> existing = weeklyReportRepository
+                        .findByEmployeeIdAndWeekNumberAndYear(employeeId, request.getWeekNumber(), request.getYear());
+
+                WeeklyPerformanceReport report;
+                if (existing.isPresent()) {
+                    report = existing.get();
+                } else {
+                    report = new WeeklyPerformanceReport();
+                    report.setEmployeeId(employeeId);
+                    report.setWeekNumber(request.getWeekNumber());
+                    report.setYear(request.getYear());
+                    // Set default pillar scores (these are auto-calculated, so we use neutral defaults)
+                    report.setTechnicalScore(3);
+                    report.setBehavioralScore(3);
+                    report.setCultureFitScore(3);
+                    report.setGrowthLearningScore(3);
+                }
+
+                report.setWeekStartDate(weekStart);
+                report.setWeekEndDate(weekEnd);
+                report.setReviewerId(teamLeadId);
+
+                // Set the 3 simplified ratings
+                report.setTeamworkCollaborationScore(rating.getTeamworkCollaborationScore());
+                report.setInitiativeScore(rating.getInitiativeScore());
+                report.setAttitudeTowardsWorkScore(rating.getAttitudeTowardsWorkScore());
+                
+                // Set team report URL if provided
+                if (request.getTeamReportUrl() != null) {
+                    report.setTeamReportUrl(request.getTeamReportUrl());
+                }
+
+                // Store notes in behavioral notes for now
+                if (rating.getNotes() != null) {
+                    report.setBehavioralNotes(rating.getNotes());
+                }
+
+                report.setStatus("submitted");
+
+                WeeklyPerformanceReport saved = weeklyReportRepository.save(report);
+                Profile employee = profileRepository.findById(employeeId).orElse(null);
+                responses.add(mapToResponse(saved, employee, teamLead));
+            } catch (Exception e) {
+                System.err.println("Failed to submit simplified report for employee " + rating.getEmployeeId() + ": " + e.getMessage());
+            }
+        }
+
+        return responses;
+    }
+
+    /**
      * Get all reports for a specific week (admin view)
      */
     public List<WeeklyReportDto.ReportResponse> getWeeklyReports(Integer weekNumber, Integer year) {

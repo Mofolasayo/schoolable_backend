@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,4 +34,9 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Long> {
     
     // Find attendance that hasn't checked out yet
     List<Attendance> findByUserIdAndCheckOutIsNull(UUID userId);
+
+    // Count methods for performance calculations
+    long countByUserIdAndCreatedAtAfter(UUID userId, OffsetDateTime after);
+    long countByUserIdAndStatusAndCreatedAtAfter(UUID userId, String status, OffsetDateTime after);
 }
+

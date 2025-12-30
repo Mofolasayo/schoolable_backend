@@ -122,6 +122,52 @@ public class WeeklyReportController {
     }
 
     /**
+     * SIMPLIFIED: Team Lead submits the 3 key ratings for all team members
+     * 
+     * POST /api/performance/weekly/simplified
+     * 
+     * Request body:
+     * {
+     *   "weekNumber": 1,
+     *   "year": 2026,
+     *   "teamReportUrl": "https://...",
+     *   "ratings": [
+     *     {
+     *       "employeeId": "uuid1",
+     *       "teamworkCollaborationScore": 4,
+     *       "initiativeScore": 5,
+     *       "attitudeTowardsWorkScore": 4,
+     *       "notes": "Great work this week"
+     *     },
+     *     ...
+     *   ]
+     * }
+     */
+    @PostMapping("/simplified")
+    @Operation(summary = "Submit simplified weekly ratings (3 items per employee)")
+    public ResponseEntity<?> submitSimplifiedReports(
+            @RequestHeader("X-User-ID") String userId,
+            @Valid @RequestBody WeeklyReportDto.SimplifiedBatchRequest request) {
+        try {
+            UUID teamLeadId = UUID.fromString(userId);
+            List<WeeklyReportDto.ReportResponse> responses = weeklyReportService.submitSimplifiedReports(teamLeadId, request);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", String.format("%d simplified reports submitted for Week %d, %d", 
+                responses.size(), request.getWeekNumber(), request.getYear()));
+            result.put("reports", responses);
+            
+            return ResponseEntity.status(HttpStatus.CREATED).body(result);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
      * Get all weekly reports for a specific week (Admin view)
      * 
      * GET /api/performance/weekly?week=1&year=2026
