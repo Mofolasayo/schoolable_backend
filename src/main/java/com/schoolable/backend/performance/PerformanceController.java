@@ -1,5 +1,7 @@
 package com.schoolable.backend.performance;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,6 +30,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/performance")
 @CrossOrigin(origins = "*")
+@Tag(name = "Performance Reviews", description = "Quarterly performance assessment APIs")
 public class PerformanceController {
 
     private final PerformanceReviewService reviewService;

@@ -1,5 +1,7 @@
 package com.schoolable.backend.performance;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +28,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/performance/weekly")
 @CrossOrigin(origins = "*")
+@Tag(name = "Weekly Reports", description = "Weekly performance rating APIs - aggregated quarterly")
 public class WeeklyReportController {
 
     private final WeeklyReportService weeklyReportService;
