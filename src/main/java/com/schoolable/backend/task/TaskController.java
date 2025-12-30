@@ -2,6 +2,7 @@ package com.schoolable.backend.task;
 
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import com.schoolable.backend.websocket.WebSocketMessageController;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
@@ -22,18 +23,21 @@ public class TaskController {
     private final TaskCommentRepository commentRepository;
     private final TaskAttachmentRepository attachmentRepository;
     private final ProfileRepository profileRepository;
+    private final WebSocketMessageController webSocketController;
 
     public TaskController(
             TaskRepository taskRepository,
             TaskSubtaskRepository subtaskRepository,
             TaskCommentRepository commentRepository,
             TaskAttachmentRepository attachmentRepository,
-            ProfileRepository profileRepository) {
+            ProfileRepository profileRepository,
+            WebSocketMessageController webSocketController) {
         this.taskRepository = taskRepository;
         this.subtaskRepository = subtaskRepository;
         this.commentRepository = commentRepository;
         this.attachmentRepository = attachmentRepository;
         this.profileRepository = profileRepository;
+        this.webSocketController = webSocketController;
     }
 
     @Operation(summary = "Get all tasks with related data")
@@ -133,7 +137,11 @@ public class TaskController {
             }
         }
 
-        return ResponseEntity.ok(buildTaskResponse(task));
+        // Broadcast task creation via WebSocket
+        Map<String, Object> taskResponse = buildTaskResponse(task);
+        webSocketController.broadcastTaskUpdate("created", task.getId(), taskResponse);
+
+        return ResponseEntity.ok(taskResponse);
     }
 
     @Operation(summary = "Update a task")
@@ -160,7 +168,12 @@ public class TaskController {
         if (req.progress() != null) task.setProgress(req.progress());
 
         taskRepository.save(task);
-        return ResponseEntity.ok(buildTaskResponse(task));
+        
+        // Broadcast task update via WebSocket
+        Map<String, Object> taskResponse = buildTaskResponse(task);
+        webSocketController.broadcastTaskUpdate("updated", task.getId(), taskResponse);
+        
+        return ResponseEntity.ok(taskResponse);
     }
 
     @Operation(summary = "Update task status")
@@ -189,7 +202,12 @@ public class TaskController {
         }
 
         taskRepository.save(task);
-        return ResponseEntity.ok(buildTaskResponse(task));
+        
+        // Broadcast task status update via WebSocket
+        Map<String, Object> taskResponse = buildTaskResponse(task);
+        webSocketController.broadcastTaskUpdate("updated", task.getId(), taskResponse);
+        
+        return ResponseEntity.ok(taskResponse);
     }
 
     @Operation(summary = "Update task description")
@@ -227,6 +245,9 @@ public class TaskController {
         commentRepository.deleteByTaskId(id);
         attachmentRepository.deleteByTaskId(id);
         taskRepository.deleteById(id);
+
+        // Broadcast task deletion via WebSocket
+        webSocketController.broadcastTaskUpdate("deleted", id, Map.of("id", id));
 
         return ResponseEntity.ok(Map.of("success", true));
     }

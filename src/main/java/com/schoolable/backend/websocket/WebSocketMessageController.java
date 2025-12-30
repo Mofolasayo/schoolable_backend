@@ -5,6 +5,8 @@ import com.schoolable.backend.messaging.Message;
 import com.schoolable.backend.messaging.MessageRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -29,6 +31,10 @@ public class WebSocketMessageController {
     private final MessageRepository messageRepository;
     private final ChannelMemberRepository memberRepository;
     private final ProfileRepository profileRepository;
+    
+    @Autowired
+    @Lazy
+    private NativeWebSocketConfig nativeWebSocketConfig;
 
     public WebSocketMessageController(
             SimpMessagingTemplate messagingTemplate,
@@ -170,6 +176,51 @@ public class WebSocketMessageController {
      */
     public void broadcastToChannel(UUID channelId, Map<String, Object> message) {
         messagingTemplate.convertAndSend("/topic/channel/" + channelId, message);
+    }
+
+    /**
+     * Broadcast task updates to all connected clients.
+     * Called when tasks are created, updated, or deleted.
+     */
+    public void broadcastTaskUpdate(String action, Long taskId, Map<String, Object> taskData) {
+        Map<String, Object> notification = new HashMap<>();
+        notification.put("type", "NOTIFICATION");
+        notification.put("notificationType", "task_" + action);
+        notification.put("taskId", taskId);
+        notification.put("data", taskData);
+        notification.put("timestamp", System.currentTimeMillis());
+
+        // Broadcast to STOMP clients
+        messagingTemplate.convertAndSend("/topic/tasks", notification);
+        
+        // Broadcast to native WebSocket clients
+        if (nativeWebSocketConfig != null) {
+            nativeWebSocketConfig.broadcastToTopic("/topic/tasks", notification);
+        }
+        
+        System.out.println("📣 Task " + action + " broadcast for task " + taskId);
+    }
+
+    /**
+     * Broadcast announcement updates to all connected clients.
+     */
+    public void broadcastAnnouncementUpdate(String action, Long announcementId, Map<String, Object> announcementData) {
+        Map<String, Object> notification = new HashMap<>();
+        notification.put("type", "NOTIFICATION");
+        notification.put("notificationType", "announcement_" + action);
+        notification.put("announcementId", announcementId);
+        notification.put("data", announcementData);
+        notification.put("timestamp", System.currentTimeMillis());
+
+        // Broadcast to STOMP clients
+        messagingTemplate.convertAndSend("/topic/announcements", notification);
+        
+        // Broadcast to native WebSocket clients
+        if (nativeWebSocketConfig != null) {
+            nativeWebSocketConfig.broadcastToTopic("/topic/announcements", notification);
+        }
+        
+        System.out.println("📣 Announcement " + action + " broadcast for announcement " + announcementId);
     }
 
     private Map<String, Object> buildMessageResponse(Message msg, UUID senderId) {

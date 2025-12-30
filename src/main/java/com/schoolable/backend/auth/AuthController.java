@@ -222,6 +222,86 @@ public ResponseEntity<?> debugToken(@RequestParam("token") String token) {
         return token.getToken();
     }
 
+    // ==================== PASSWORD RESET ====================
+
+    @Operation(summary = "Request password reset (sends OTP to email)")
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> requestPasswordReset(@Valid @RequestBody ResetPasswordRequest req) {
+        var profileOpt = profileRepository.findByEmailIgnoreCase(req.email());
+        if (profileOpt.isEmpty()) {
+            // Don't reveal if email exists or not for security
+            return ResponseEntity.ok(Map.of(
+                "message", "If an account with this email exists, a reset code has been sent."
+            ));
+        }
+        
+        var profile = profileOpt.get();
+        
+        // Create a reset token (reusing the verification token table)
+        tokenRepository.deleteByProfileId(profile.getId());
+        String resetToken = createVerificationToken(profile.getId());
+        
+        // Send reset email
+        emailService.sendPasswordResetEmail(profile.getEmail(), resetToken);
+        
+        return ResponseEntity.ok(Map.of(
+            "message", "If an account with this email exists, a reset code has been sent.",
+            "resetToken", resetToken // For development only - remove in production
+        ));
+    }
+
+    @Operation(summary = "Verify reset code")
+    @PostMapping("/verify-reset-code")
+    public ResponseEntity<?> verifyResetCode(@Valid @RequestBody VerifyResetCodeRequest req) {
+        var tokenOpt = tokenRepository.findByToken(req.code());
+        if (tokenOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid reset code"));
+        }
+        
+        var token = tokenOpt.get();
+        if (token.getExpiresAt().isBefore(OffsetDateTime.now())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Reset code has expired"));
+        }
+        
+        return ResponseEntity.ok(Map.of(
+            "valid", true,
+            "message", "Code verified. You can now reset your password."
+        ));
+    }
+
+    @Operation(summary = "Complete password reset with new password")
+    @PostMapping("/complete-reset")
+    public ResponseEntity<?> completePasswordReset(@Valid @RequestBody CompleteResetRequest req) {
+        var tokenOpt = tokenRepository.findByToken(req.code());
+        if (tokenOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid reset code"));
+        }
+        
+        var token = tokenOpt.get();
+        if (token.getExpiresAt().isBefore(OffsetDateTime.now())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Reset code has expired"));
+        }
+        
+        // Find the profile
+        var profileOpt = profileRepository.findById(token.getProfileId());
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Account not found"));
+        }
+        
+        // Update password
+        var profile = profileOpt.get();
+        profile.setPasswordHash(passwordEncoder.encode(req.newPassword()));
+        profile.setUpdatedAt(OffsetDateTime.now());
+        profileRepository.save(profile);
+        
+        // Delete the used token
+        tokenRepository.delete(token);
+        
+        return ResponseEntity.ok(Map.of(
+            "message", "Password reset successful. You can now login with your new password."
+        ));
+    }
+
     private ResponseEntity<String> htmlResponse(String message) {
         String html = """
                 <!doctype html>
@@ -255,4 +335,13 @@ public ResponseEntity<?> debugToken(@RequestParam("token") String token) {
     public record VerifyEmailRequest(@NotBlank String token) {}
 
     public record ResendRequest(@Email @NotBlank String email) {}
+
+    public record ResetPasswordRequest(@Email @NotBlank String email) {}
+
+    public record VerifyResetCodeRequest(@NotBlank String code) {}
+
+    public record CompleteResetRequest(
+            @NotBlank String code,
+            @NotBlank String newPassword
+    ) {}
 }

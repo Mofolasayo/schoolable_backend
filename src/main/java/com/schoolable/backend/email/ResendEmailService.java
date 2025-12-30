@@ -73,6 +73,49 @@ public class ResendEmailService {
         return html;
     }
 
+    public void sendPasswordResetEmail(String to, String code) {
+        if (apiKey == null || apiKey.isBlank() || from == null || from.isBlank()) {
+            log.warn("Resend not configured (missing apiKey/from). Skipping password reset email to {}", to);
+            return;
+        }
+        try {
+            String html = buildPasswordResetEmailHtml(code);
+            String body = """
+                    {
+                      "from": "%s",
+                      "to": ["%s"],
+                      "subject": "Reset your Schoolable password",
+                      "html": "%s"
+                    }
+                    """.formatted(escapeJson(from), escapeJson(to), html);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.resend.com/emails"))
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                log.info("Sent password reset email to {}", to);
+            } else {
+                log.warn("Failed to send password reset email to {}. Status: {} Body: {}", to, response.statusCode(), response.body());
+            }
+        } catch (Exception ex) {
+            log.error("Error sending password reset email to {}", to, ex);
+        }
+    }
+
+    private String buildPasswordResetEmailHtml(String code) {
+        String html = "<p>You requested to reset your Schoolable password.</p>"
+                + "<p>Your reset code is:</p>"
+                + "<p style=\\\"font-size:22px; font-weight:bold; letter-spacing:4px;\\\">" + escapeJson(code) + "</p>"
+                + "<p>Enter this code in the app to reset your password.</p>"
+                + "<p>If you didn't request this, you can safely ignore this email.</p>";
+        return html;
+    }
+
     private String escapeJson(String input) {
         return input.replace("\\", "\\\\").replace("\"", "\\\"");
     }

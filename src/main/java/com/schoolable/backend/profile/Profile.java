@@ -228,11 +228,99 @@ public class Profile {
     @Column(name = "last_seen")
     private OffsetDateTime lastSeen;
 
+    // Performance Management fields
+    @Column(name = "employee_level")
+    private Integer employeeLevel = 1;
+
+    private String cadre;
+
+    @Column(name = "confirmation_status")
+    private String confirmationStatus = "probation";
+
+    @Column(name = "confirmation_date")
+    private java.sql.Date confirmationDate;
+
+    @Column(name = "probation_end_date")
+    private java.sql.Date probationEndDate;
+
+    @Column(name = "is_team_lead")
+    private Boolean isTeamLead = false;
+
+    @Column(name = "base_salary")
+    private java.math.BigDecimal baseSalary;
+
+    @Column(name = "pfp_eligible")
+    private Boolean pfpEligible = false;
+
     public OffsetDateTime getLastSeen() {
         return lastSeen;
     }
 
     public void setLastSeen(OffsetDateTime lastSeen) {
         this.lastSeen = lastSeen;
+    }
+
+    public Integer getEmployeeLevel() {
+        return employeeLevel;
+    }
+
+    public void setEmployeeLevel(Integer employeeLevel) {
+        this.employeeLevel = employeeLevel;
+    }
+
+    public String getCadre() {
+        return cadre;
+    }
+
+    public void setCadre(String cadre) {
+        this.cadre = cadre;
+    }
+
+    public String getConfirmationStatus() {
+        return confirmationStatus;
+    }
+
+    public void setConfirmationStatus(String confirmationStatus) {
+        this.confirmationStatus = confirmationStatus;
+    }
+
+    public java.sql.Date getConfirmationDate() {
+        return confirmationDate;
+    }
+
+    public void setConfirmationDate(java.sql.Date confirmationDate) {
+        this.confirmationDate = confirmationDate;
+    }
+
+    public java.sql.Date getProbationEndDate() {
+        return probationEndDate;
+    }
+
+    public void setProbationEndDate(java.sql.Date probationEndDate) {
+        this.probationEndDate = probationEndDate;
+    }
+
+    public Boolean getIsTeamLead() {
+        return isTeamLead;
+    }
+
+    public void setIsTeamLead(Boolean isTeamLead) {
+        this.isTeamLead = isTeamLead;
+    }
+
+    public java.math.BigDecimal getBaseSalary() {
+        return baseSalary;
+    }
+
+    public void setBaseSalary(java.math.BigDecimal baseSalary) {
+        this.baseSalary = baseSalary;
+    }
+
+    public Boolean getPfpEligible() {
+        return pfpEligible;
+    }
+
+    public void setPfpEligible(Boolean pfpEligible) {
+        this.pfpEligible = pfpEligible;
     }
 }
