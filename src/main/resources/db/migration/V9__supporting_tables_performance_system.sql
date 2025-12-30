@@ -360,8 +360,7 @@ SELECT
     DATE_TRUNC('quarter', completion_date) AS quarter,
     COUNT(*) AS trainings_completed,
     SUM(duration_hours) AS total_hours,
-    ARRAY_AGG(DISTINCT skill_category) AS categories_covered,
-    ARRAY_AGG(DISTINCT UNNEST(skill_tags)) AS skills_acquired
+    ARRAY_AGG(DISTINCT skill_category) AS categories_covered
 FROM training_records
 WHERE status = 'completed'
 GROUP BY employee_id, DATE_TRUNC('quarter', completion_date);
