@@ -238,7 +238,7 @@ WHERE competency_area_id IS NULL;
 -- 7. CREATE HELPER VIEWS
 -- ============================================
 
--- View: Employee Competency Breakdown
+-- View: Employee Competency Breakdown (4 Core Pillars)
 CREATE OR REPLACE VIEW v_employee_competency_summary AS
 SELECT 
     pr.employee_id,
@@ -248,7 +248,7 @@ SELECT
     pr.behavioral_score,
     pr.culture_fit_score,
     pr.growth_learning_score,
-    pr.collaboration_score,
+    pr.leadership_score,  -- Separate for team leads
     pr.quarterly_score,
     pr.quarterly_gpa,
     ea.current_cgpa,
@@ -258,11 +258,11 @@ SELECT
     p.department,
     p.employee_level
 FROM performance_reviews pr
-JOIN employee_aura ea ON pr.employee_id = ea.employee_id AND pr.review_year = ea.year
+LEFT JOIN employee_aura ea ON pr.employee_id = ea.employee_id AND pr.review_year = ea.year
 JOIN profiles p ON pr.employee_id = p.id
 WHERE pr.status = 'approved';
 
--- View: Competency Area Averages by Department
+-- View: Competency Area Averages by Department (4 Core Pillars)
 CREATE OR REPLACE VIEW v_department_competency_averages AS
 SELECT 
     p.department,
@@ -272,7 +272,6 @@ SELECT
     ROUND(AVG(pr.behavioral_score), 2) AS avg_behavioral,
     ROUND(AVG(pr.culture_fit_score), 2) AS avg_culture_fit,
     ROUND(AVG(pr.growth_learning_score), 2) AS avg_growth_learning,
-    ROUND(AVG(pr.collaboration_score), 2) AS avg_collaboration,
     ROUND(AVG(pr.quarterly_score), 2) AS avg_overall,
     COUNT(*) AS employee_count
 FROM performance_reviews pr
@@ -283,8 +282,7 @@ GROUP BY p.department, pr.review_year, pr.quarter;
 -- ============================================
 -- MIGRATION COMPLETE
 -- ============================================
--- 5-Pillar Competency Model implemented
+-- 4-Pillar Competency Model implemented (Collaboration removed)
 -- Tables created: 3 (competency_areas, competency_criteria, competency_scores)
 -- Views created: 2
--- Columns added to performance_reviews: 10
--- Sample criteria populated: 12+
+-- Columns added to performance_reviews: pillar scores + comments
