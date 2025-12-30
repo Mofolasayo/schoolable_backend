@@ -249,10 +249,7 @@ CREATE TABLE pip_records (
     -- PIP period
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    duration_months INTEGER GENERATED ALWAYS AS (
-        EXTRACT(YEAR FROM AGE(end_date, start_date)) * 12 + 
-        EXTRACT(MONTH FROM AGE(end_date, start_date))
-    ) STORED,
+    duration_months INTEGER, -- Calculated by application: months between start and end
     
     -- Trigger information
     trigger_cgpa DECIMAL(3,2),
@@ -285,6 +282,24 @@ CREATE TABLE pip_records (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     completed_at TIMESTAMPTZ
 );
+
+-- Trigger to auto-calculate duration_months on insert/update
+CREATE OR REPLACE FUNCTION update_pip_duration_months()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.duration_months := (
+        EXTRACT(YEAR FROM NEW.end_date) - EXTRACT(YEAR FROM NEW.start_date)
+    ) * 12 + (
+        EXTRACT(MONTH FROM NEW.end_date) - EXTRACT(MONTH FROM NEW.start_date)
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_pip_duration
+    BEFORE INSERT OR UPDATE ON pip_records
+    FOR EACH ROW
+    EXECUTE FUNCTION update_pip_duration_months();
 
 -- Indexes for PIP records
 CREATE INDEX idx_pip_records_employee ON pip_records(employee_id);
