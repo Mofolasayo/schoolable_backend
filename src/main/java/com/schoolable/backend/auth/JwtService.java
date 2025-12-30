@@ -43,4 +43,31 @@ public class JwtService {
                 .parseClaimsJws(token)
                 .getBody();
     }
+
+    /**
+     * Extract user ID from JWT token
+     */
+    public UUID extractUserId(String token) {
+        try {
+            Claims claims = parse(token);
+            String subject = claims.getSubject();
+            return subject != null ? UUID.fromString(subject) : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Check if token is expired
+     */
+    public boolean isExpired(String token) {
+        try {
+            Claims claims = parse(token);
+            Date expiration = claims.getExpiration();
+            return expiration.before(new Date());
+        } catch (Exception e) {
+            return true; // Consider invalid tokens as expired
+        }
+    }
 }
+
