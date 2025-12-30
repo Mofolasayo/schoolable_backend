@@ -39,10 +39,11 @@ ADD COLUMN IF NOT EXISTS leadership_comments TEXT;
 -- ============================================
 -- 2. UPDATE QUARTERLY_SCORE TO BE CALCULATED
 -- ============================================
--- Drop the existing quarterly_score column (it's currently NOT NULL in V7)
-ALTER TABLE performance_reviews DROP COLUMN IF EXISTS quarterly_score;
+-- Drop the existing quarterly_score column (CASCADE needed because quarterly_gpa depends on it)
+ALTER TABLE performance_reviews DROP COLUMN IF EXISTS quarterly_score CASCADE;
+-- quarterly_gpa was also dropped due to CASCADE, so we'll recreate both
 
--- Add it back as a generated column with 25% weight per pillar
+-- Add quarterly_score as a generated column with 25% weight per pillar
 -- 
 -- AURA CALCULATION (Same for ALL employees):
 -- - 4 pillars total (Technical, Behavioral, Culture, Growth)
@@ -68,8 +69,23 @@ ADD COLUMN quarterly_score DECIMAL(5,2) GENERATED ALWAYS AS (
     END
 ) STORED;
 
--- The quarterly_gpa column already exists and auto-calculates from quarterly_score
--- So it will now automatically reflect the 4-pillar composite score
+-- Recreate quarterly_gpa (convert 0-100 score to 0-5 GPA)
+ALTER TABLE performance_reviews
+ADD COLUMN quarterly_gpa DECIMAL(3,2) GENERATED ALWAYS AS (
+    CASE 
+        WHEN technical_score IS NOT NULL 
+             AND behavioral_score IS NOT NULL 
+             AND culture_fit_score IS NOT NULL 
+             AND growth_learning_score IS NOT NULL 
+        THEN (
+            (technical_score * 0.25) +
+            (behavioral_score * 0.25) +
+            (culture_fit_score * 0.25) +
+            (growth_learning_score * 0.25)
+        ) / 20
+        ELSE NULL
+    END
+) STORED;
 
 -- ============================================
 -- 3. CREATE COMPETENCY AREAS TABLE
