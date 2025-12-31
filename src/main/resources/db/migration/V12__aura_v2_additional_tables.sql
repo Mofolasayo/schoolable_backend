@@ -2,6 +2,25 @@
 -- Creates tables needed for auto-calculated performance metrics
 
 -- ============================================
+-- CLEANUP: Drop incomplete tables from failed migrations
+-- ============================================
+-- These tables may have been partially created with missing columns
+-- due to previous migration failures. Drop them to recreate properly.
+
+-- Drop views that depend on these tables first
+DROP VIEW IF EXISTS v_announcement_engagement CASCADE;
+DROP VIEW IF EXISTS v_training_summary CASCADE;
+DROP VIEW IF EXISTS v_peer_feedback_summary CASCADE;
+
+-- Drop tables
+DROP TABLE IF EXISTS announcement_views CASCADE;
+DROP TABLE IF EXISTS peer_feedback CASCADE;
+DROP TABLE IF EXISTS improvement_suggestions CASCADE;
+DROP TABLE IF EXISTS disciplinary_actions CASCADE;
+DROP TABLE IF EXISTS task_attachments CASCADE;
+DROP TABLE IF EXISTS training_records CASCADE;
+
+-- ============================================
 -- 1. TRAINING RECORDS TABLE
 -- ============================================
 -- Tracks employee training completions for Growth & Learning pillar
