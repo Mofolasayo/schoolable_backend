@@ -79,6 +79,16 @@ public class WeeklyPerformanceReport {
     @Column(name = "attitude_towards_work_score")
     private Integer attitudeTowardsWorkScore;
 
+    // NEW: Additional Team Lead Ratings (V14 migration)
+    @Column(name = "adaptability_score")
+    private Integer adaptabilityScore;  // Behavioral pillar
+
+    @Column(name = "integrity_score")
+    private Integer integrityScore;     // Culture Fit pillar
+
+    @Column(name = "self_initiative_score")
+    private Integer selfInitiativeScore; // Growth pillar
+
     @Column(name = "team_report_url")
     private String teamReportUrl;
 
@@ -176,6 +186,17 @@ public class WeeklyPerformanceReport {
     public Integer getAttitudeTowardsWorkScore() { return attitudeTowardsWorkScore; }
     public void setAttitudeTowardsWorkScore(Integer attitudeTowardsWorkScore) { this.attitudeTowardsWorkScore = attitudeTowardsWorkScore; }
 
+    // V14: New rating fields getters/setters
+    public Integer getAdaptabilityScore() { return adaptabilityScore; }
+    public void setAdaptabilityScore(Integer adaptabilityScore) { this.adaptabilityScore = adaptabilityScore; }
+
+    public Integer getIntegrityScore() { return integrityScore; }
+    public void setIntegrityScore(Integer integrityScore) { this.integrityScore = integrityScore; }
+
+    public Integer getSelfInitiativeScore() { return selfInitiativeScore; }
+    public void setSelfInitiativeScore(Integer selfInitiativeScore) { this.selfInitiativeScore = selfInitiativeScore; }
+
     public String getTeamReportUrl() { return teamReportUrl; }
     public void setTeamReportUrl(String teamReportUrl) { this.teamReportUrl = teamReportUrl; }
 }
+

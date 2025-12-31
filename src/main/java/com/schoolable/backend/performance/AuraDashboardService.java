@@ -108,28 +108,37 @@ public class AuraDashboardService {
 
     /**
      * Calculate Technical Competence pillar (25%)
-     * Based on task completion and on-time delivery
+     * Now primarily set by Team Lead (each team has different criteria)
+     * Falls back to task completion if no TL rating
      */
     private AuraDashboardDto.PillarDetail calculateTechnicalPillar(UUID employeeId) {
         AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
         pillar.setName("Technical Competence");
         pillar.setWeight(25.0);
-        pillar.setDataSource("auto");
+        pillar.setDataSource("team_lead");
 
         LocalDate quarterStart = getQuarterStartDate();
+        List<WeeklyPerformanceReport> reports = weeklyReportRepository
+            .findByEmployeeIdAndWeekStartDateAfter(employeeId, quarterStart);
+
+        double technicalScore = 50.0; // Default
+
+        if (!reports.isEmpty()) {
+            // Use Team Lead's technical score rating (1-5) × 20 = 0-100
+            technicalScore = reports.stream()
+                .filter(r -> r.getTechnicalScore() != null)
+                .mapToInt(WeeklyPerformanceReport::getTechnicalScore)
+                .average()
+                .orElse(2.5) * 20;
+        } else {
+            // Fallback: calculate from task completion if no TL rating
+            OffsetDateTime quarterStartOdt = quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC);
+            long totalTasks = taskRepository.countByAssigneeIdAndCreatedAtAfter(employeeId, quarterStartOdt);
+            long completedTasks = taskRepository.countByAssigneeIdAndStatusAndCreatedAtAfter(employeeId, "Completed", quarterStartOdt);
+            technicalScore = totalTasks > 0 ? (completedTasks * 100.0 / totalTasks) : 50.0;
+            pillar.setDataSource("auto"); // Mark as auto if using fallback
+        }
         
-        // Task completion rate
-        OffsetDateTime quarterStartOdt = quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC);
-        long totalTasks = taskRepository.countByAssigneeIdAndCreatedAtAfter(employeeId, quarterStartOdt);
-        long completedTasks = taskRepository.countByAssigneeIdAndStatusAndCreatedAtAfter(employeeId, "Completed", quarterStartOdt);
-        
-        double completionRate = totalTasks > 0 ? (completedTasks * 100.0 / totalTasks) : 50.0;
-        
-        // On-time delivery rate (simplified - assumes completed tasks are on time)
-        // In real implementation, would compare updated_at to due_date
-        double onTimeRate = completionRate * 0.9; // Estimate 90% of completed are on time
-        
-        double technicalScore = (completionRate + onTimeRate) / 2;
         pillar.setScore(Math.round(technicalScore * 100.0) / 100.0);
         pillar.setContribution(Math.round(technicalScore * 0.25 * 100.0) / 100.0);
 
@@ -138,12 +147,12 @@ public class AuraDashboardService {
 
     /**
      * Calculate Behavioral Competence pillar (25%)
-     * Components:
-     * - Teamwork & Collaboration (5%) - Team Lead
-     * - Initiative (5%) - Team Lead
-     * - Professionalism (5%) - Auto (attendance)
-     * - Time Management (5%) - Auto (task deadlines)
-     * - Adaptability (5%) - Manager assessment (placeholder)
+     * Components (all 20% each):
+     * - Teamwork & Collaboration - Team Lead rating
+     * - Initiative - Team Lead rating
+     * - Professionalism - Auto (attendance)
+     * - Time Management - Auto (task deadlines)
+     * - Adaptability - Team Lead rating (NEW)
      */
     private AuraDashboardDto.PillarDetail calculateBehavioralPillar(UUID employeeId) {
         AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
@@ -158,41 +167,49 @@ public class AuraDashboardService {
 
         double teamworkScore = 50.0;
         double initiativeScore = 50.0;
+        double adaptabilityScore = 50.0;
 
         if (!reports.isEmpty()) {
-            // Average team lead ratings (convert 1-5 to 0-100)
+            // Teamwork & Collaboration (Team Lead 1-5 → 0-100)
             teamworkScore = reports.stream()
                 .filter(r -> r.getTeamworkCollaborationScore() != null)
                 .mapToInt(WeeklyPerformanceReport::getTeamworkCollaborationScore)
                 .average()
                 .orElse(2.5) * 20;
 
+            // Initiative (Team Lead 1-5 → 0-100)
             initiativeScore = reports.stream()
                 .filter(r -> r.getInitiativeScore() != null)
                 .mapToInt(WeeklyPerformanceReport::getInitiativeScore)
                 .average()
                 .orElse(2.5) * 20;
+
+            // Adaptability (NEW - Team Lead 1-5 → 0-100)
+            adaptabilityScore = reports.stream()
+                .filter(r -> r.getAdaptabilityScore() != null)
+                .mapToInt(WeeklyPerformanceReport::getAdaptabilityScore)
+                .average()
+                .orElse(2.5) * 20;
         }
 
-        // Professionalism from attendance
+        // Professionalism from attendance (Auto)
         OffsetDateTime quarterStartOdt = quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC);
         long totalAttendance = attendanceRepository.countByUserIdAndCreatedAtAfter(employeeId, quarterStartOdt);
         long presentCount = attendanceRepository.countByUserIdAndStatusAndCreatedAtAfter(employeeId, "present", quarterStartOdt);
         double professionalismScore = totalAttendance > 0 ? (presentCount * 100.0 / totalAttendance) : 70.0;
 
-        // Time management from tasks
-        double timeManagementScore = 70.0; // Placeholder, would calculate from due_date vs completion
+        // Time management from task deadline performance (Auto)
+        long totalTasks = taskRepository.countByAssigneeIdAndCreatedAtAfter(employeeId, quarterStartOdt);
+        long completedTasks = taskRepository.countByAssigneeIdAndStatusAndCreatedAtAfter(employeeId, "Completed", quarterStartOdt);
+        double timeManagementScore = totalTasks > 0 ? (completedTasks * 100.0 / totalTasks) : 70.0;
 
-        // Adaptability (manager assessment placeholder)
-        double adaptabilityScore = 60.0;
-
-        // Calculate weighted average
+        // Calculate weighted average (20% each)
         double behavioralScore = (
-            teamworkScore * 0.2 +       // 5/25 = 20%
-            initiativeScore * 0.2 +     // 5/25 = 20%
-            professionalismScore * 0.2 + // 5/25 = 20%
-            timeManagementScore * 0.2 +  // 5/25 = 20%
-            adaptabilityScore * 0.2      // 5/25 = 20%
+            teamworkScore * 0.2 +
+            initiativeScore * 0.2 +
+            professionalismScore * 0.2 +
+            timeManagementScore * 0.2 +
+            adaptabilityScore * 0.2
         );
 
         pillar.setScore(Math.round(behavioralScore * 100.0) / 100.0);
@@ -203,12 +220,12 @@ public class AuraDashboardService {
 
     /**
      * Calculate Culture Fit pillar (25%)
-     * Components (now includes collaboration):
-     * - Company Values (5%) - Manager assessment
-     * - Attitude Towards Work (5%) - Team Lead  
-     * - Teamwork & Collaboration (5%) - Team Lead + Peer Feedback
-     * - Communication & Engagement (5%) - Auto (announcement reads, messaging)
-     * - Policy Compliance (5%) - Auto (attendance, punctuality)
+     * Components (all 20% each):
+     * - Attitude Towards Work - Team Lead rating
+     * - Work Ethics - Auto (punctuality + attendance consistency)
+     * - Integrity - Team Lead rating (NEW)
+     * - Communication & Engagement - Auto (announcement reads)
+     * - Policy Compliance - Auto (attendance)
      */
     private AuraDashboardDto.PillarDetail calculateCultureFitPillar(UUID employeeId) {
         AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
@@ -232,39 +249,37 @@ public class AuraDashboardService {
                 .orElse(2.5) * 20;
         }
 
-        // 2. Teamwork & Collaboration (20% of pillar - Team Lead + Peer Feedback)
-        double teamworkScore = 50.0;
+        // 2. Work Ethics (20% of pillar - Auto: punctuality + attendance consistency)
+        // Calculated from: on-time arrivals + consistent presence
+        long totalAttendance = attendanceRepository.countByUserIdAndCreatedAtAfter(employeeId, quarterStartOdt);
+        long presentCount = attendanceRepository.countByUserIdAndStatusAndCreatedAtAfter(employeeId, "present", quarterStartOdt);
+        double attendanceRate = totalAttendance > 0 ? (presentCount * 100.0 / totalAttendance) : 70.0;
+        // Work ethics = attendance consistency (no unexplained absences)
+        double workEthicsScore = attendanceRate; 
+
+        // 3. Integrity (20% of pillar - Team Lead rating)
+        double integrityScore = 50.0;
         if (!reports.isEmpty()) {
-            teamworkScore = reports.stream()
-                .filter(r -> r.getTeamworkCollaborationScore() != null)
-                .mapToInt(WeeklyPerformanceReport::getTeamworkCollaborationScore)
+            integrityScore = reports.stream()
+                .filter(r -> r.getIntegrityScore() != null)
+                .mapToInt(WeeklyPerformanceReport::getIntegrityScore)
                 .average()
                 .orElse(2.5) * 20;
         }
-        
-        // Boost teamwork with peer feedback if available
-        double peerScore = getPeerFeedbackScore(employeeId, quarterStartOdt);
-        if (peerScore > 0) {
-            teamworkScore = (teamworkScore + peerScore) / 2; // Average with peer feedback
-        }
 
-        // 3. Communication & Engagement (20% of pillar - Auto)
+        // 4. Communication & Engagement (20% of pillar - Auto)
         double engagementScore = getAnnouncementEngagementScore(employeeId, quarterStartOdt);
 
-        // 4. Company Values (20% of pillar - placeholder)
-        double valuesScore = 70.0;
-
         // 5. Policy Compliance (20% of pillar - Auto from attendance)
-        long totalAttendance = attendanceRepository.countByUserIdAndCreatedAtAfter(employeeId, quarterStartOdt);
-        long presentCount = attendanceRepository.countByUserIdAndStatusAndCreatedAtAfter(employeeId, "present", quarterStartOdt);
-        double complianceScore = totalAttendance > 0 ? (presentCount * 100.0 / totalAttendance) : 70.0;
+        // No violations = 100%, each violation reduces score
+        double complianceScore = attendanceRate; // Same as work ethics for now
 
         // Calculate weighted average (20% each component)
         double cultureFitScore = (
             attitudeScore * 0.2 +
-            teamworkScore * 0.2 +
+            workEthicsScore * 0.2 +
+            integrityScore * 0.2 +
             engagementScore * 0.2 +
-            valuesScore * 0.2 +
             complianceScore * 0.2
         );
 
@@ -417,9 +432,9 @@ public class AuraDashboardService {
     /**
      * Calculate Growth & Learning pillar (25%)
      * Components:
-     * - Training Completion (10%) - AUTO from training_records
-     * - Skill Application (5%) - Task complexity increase (placeholder)
-     * - Knowledge Sharing (10%) - Announcements/docs created (placeholder)
+     * - Training Completion (40%) - AUTO from training_records
+     * - Self-Initiative (30%) - Team Lead rating (NEW)
+     * - Knowledge Sharing (30%) - Announcements/docs created (placeholder)
      */
     private AuraDashboardDto.PillarDetail calculateGrowthPillar(UUID employeeId) {
         AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
@@ -428,8 +443,12 @@ public class AuraDashboardService {
         pillar.setDataSource("mixed");
 
         LocalDate quarterStart = getQuarterStartDate();
+        
+        // Get Team Lead ratings for this quarter
+        List<WeeklyPerformanceReport> reports = weeklyReportRepository
+            .findByEmployeeIdAndWeekStartDateAfter(employeeId, quarterStart);
 
-        // Training Completion: Count completed trainings this quarter
+        // 1. Training Completion (40%): Count completed trainings this quarter
         long completedTrainings = trainingRecordRepository.countCompletedTrainingsInPeriod(
             employeeId, quarterStart);
         
@@ -444,17 +463,24 @@ public class AuraDashboardService {
             trainingScore = 40.0;
         }
 
-        // Skill Application (placeholder - would need task complexity analysis)
-        double skillApplicationScore = 60.0;
+        // 2. Self-Initiative (30%): Team Lead rating (NEW)
+        double selfInitiativeScore = 50.0;
+        if (!reports.isEmpty()) {
+            selfInitiativeScore = reports.stream()
+                .filter(r -> r.getSelfInitiativeScore() != null)
+                .mapToInt(WeeklyPerformanceReport::getSelfInitiativeScore)
+                .average()
+                .orElse(2.5) * 20;
+        }
 
-        // Knowledge Sharing (placeholder - would need announcements/attachments count)
+        // 3. Knowledge Sharing (30%): Placeholder - would need announcements/attachments count
         double knowledgeSharingScore = 60.0;
 
-        // Calculate weighted average (training is 40% of pillar, others 30% each)
+        // Calculate weighted average
         double growthScore = (
-            trainingScore * 0.4 +            // 10/25 = 40%
-            skillApplicationScore * 0.2 +    // 5/25 = 20%
-            knowledgeSharingScore * 0.4      // 10/25 = 40%
+            trainingScore * 0.4 +            // 40%
+            selfInitiativeScore * 0.3 +      // 30%
+            knowledgeSharingScore * 0.3      // 30%
         );
 
         pillar.setScore(Math.round(growthScore * 100.0) / 100.0);
