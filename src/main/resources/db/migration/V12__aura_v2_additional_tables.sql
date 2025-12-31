@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_peer_feedback_quarter ON peer_feedback(quarter, y
 
 CREATE TABLE IF NOT EXISTS announcement_views (
     id BIGSERIAL PRIMARY KEY,
-    announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+    announcement_id UUID NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
     employee_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     
     -- View tracking
