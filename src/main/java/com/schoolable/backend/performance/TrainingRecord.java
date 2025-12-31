@@ -7,8 +7,9 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Entity for tracking employee training completions.
+ * Entity for tracking employee training completions/certificates.
  * Used for Growth & Learning pillar calculation.
+ * Certificates must be approved by Super Admin to count for the quarter.
  */
 @Entity
 @Table(name = "training_records")
@@ -35,7 +36,14 @@ public class TrainingRecord {
     @Column(name = "duration_hours")
     private BigDecimal durationHours;
 
-    private String status = "in_progress"; // in_progress, completed, failed, expired
+    private String status = "pending"; // pending, approved, rejected
+
+    // Quarter tracking for certificate uploads
+    @Column(name = "quarter")
+    private String quarter; // Q1, Q2, Q3, Q4
+
+    @Column(name = "year")
+    private Integer year;
 
     @Column(name = "started_at")
     private OffsetDateTime startedAt;
@@ -51,6 +59,16 @@ public class TrainingRecord {
     @Column(name = "certificate_url")
     private String certificateUrl;
 
+    // Approval workflow
+    @Column(name = "approved_by")
+    private UUID approvedBy;
+
+    @Column(name = "approved_at")
+    private OffsetDateTime approvedAt;
+
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
+
     @Column(name = "created_at")
     private OffsetDateTime createdAt;
 
@@ -61,6 +79,16 @@ public class TrainingRecord {
     protected void onCreate() {
         createdAt = OffsetDateTime.now();
         updatedAt = OffsetDateTime.now();
+        if (quarter == null) {
+            int month = LocalDate.now().getMonthValue();
+            if (month <= 3) quarter = "Q1";
+            else if (month <= 6) quarter = "Q2";
+            else if (month <= 9) quarter = "Q3";
+            else quarter = "Q4";
+        }
+        if (year == null) {
+            year = LocalDate.now().getYear();
+        }
     }
 
     @PreUpdate
@@ -93,6 +121,12 @@ public class TrainingRecord {
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
+    public String getQuarter() { return quarter; }
+    public void setQuarter(String quarter) { this.quarter = quarter; }
+
+    public Integer getYear() { return year; }
+    public void setYear(Integer year) { this.year = year; }
+
     public OffsetDateTime getStartedAt() { return startedAt; }
     public void setStartedAt(OffsetDateTime startedAt) { this.startedAt = startedAt; }
 
@@ -108,6 +142,16 @@ public class TrainingRecord {
     public String getCertificateUrl() { return certificateUrl; }
     public void setCertificateUrl(String certificateUrl) { this.certificateUrl = certificateUrl; }
 
+    public UUID getApprovedBy() { return approvedBy; }
+    public void setApprovedBy(UUID approvedBy) { this.approvedBy = approvedBy; }
+
+    public OffsetDateTime getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(OffsetDateTime approvedAt) { this.approvedAt = approvedAt; }
+
+    public String getRejectionReason() { return rejectionReason; }
+    public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
+
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }
+
