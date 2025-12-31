@@ -68,13 +68,13 @@ public class AuraDashboardDto {
 
     /**
      * Individual pillar score breakdown
+     * Now 4 pillars at 25% each (collaboration merged into cultureFit)
      */
     public static class PillarScores {
         private PillarDetail technical;
         private PillarDetail behavioral;
-        private PillarDetail cultureFit;
+        private PillarDetail cultureFit;      // Now includes collaboration metrics
         private PillarDetail growthLearning;
-        private PillarDetail collaboration;
 
         public PillarDetail getTechnical() { return technical; }
         public void setTechnical(PillarDetail technical) { this.technical = technical; }
@@ -87,9 +87,6 @@ public class AuraDashboardDto {
 
         public PillarDetail getGrowthLearning() { return growthLearning; }
         public void setGrowthLearning(PillarDetail growthLearning) { this.growthLearning = growthLearning; }
-
-        public PillarDetail getCollaboration() { return collaboration; }
-        public void setCollaboration(PillarDetail collaboration) { this.collaboration = collaboration; }
     }
 
     /**

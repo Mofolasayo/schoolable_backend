@@ -67,38 +67,33 @@ public class AuraDashboardService {
         response.setCurrentQuarter("Q" + currentQuarter);
         response.setCurrentYear(now.getYear());
 
-        // Calculate each pillar
+        // Calculate each pillar (4 pillars × 25% each)
         AuraDashboardDto.PillarScores pillars = new AuraDashboardDto.PillarScores();
 
-        // Technical Pillar (Auto-calculated from tasks)
+        // Technical Pillar (25% - Auto-calculated from tasks)
         AuraDashboardDto.PillarDetail technical = calculateTechnicalPillar(employeeId);
         pillars.setTechnical(technical);
 
-        // Behavioral Pillar (Mixed: Team Lead + Auto)
+        // Behavioral Pillar (25% - Mixed: Team Lead + Auto)
         AuraDashboardDto.PillarDetail behavioral = calculateBehavioralPillar(employeeId);
         pillars.setBehavioral(behavioral);
 
-        // Culture Fit Pillar (Mixed: Team Lead + Auto)
+        // Culture Fit Pillar (25% - Mixed: Team Lead + Auto + Collaboration metrics)
         AuraDashboardDto.PillarDetail cultureFit = calculateCultureFitPillar(employeeId);
         pillars.setCultureFit(cultureFit);
 
-        // Growth & Learning Pillar (V2: Now uses training records)
+        // Growth & Learning Pillar (25% - Uses training records)
         AuraDashboardDto.PillarDetail growth = calculateGrowthPillar(employeeId);
         pillars.setGrowthLearning(growth);
 
-        // Collaboration Pillar (partially auto-calculated)
-        AuraDashboardDto.PillarDetail collaboration = calculateCollaborationPillar(employeeId);
-        pillars.setCollaboration(collaboration);
-
         response.setPillars(pillars);
 
-        // Calculate overall Aura score
+        // Calculate overall Aura score (4 pillars × 25% each = 100%)
         double auraScore = 
             technical.getContribution() +
             behavioral.getContribution() +
             cultureFit.getContribution() +
-            growth.getContribution() / 2 +      // Half weight for unimplemented
-            collaboration.getContribution() / 2; // Half weight for unimplemented
+            growth.getContribution();
         
         response.setAuraScore(Math.round(auraScore * 100.0) / 100.0);
         response.setQgpa(Math.round((auraScore / 20) * 100.0) / 100.0);
@@ -208,12 +203,12 @@ public class AuraDashboardService {
 
     /**
      * Calculate Culture Fit pillar (25%)
-     * Components:
+     * Components (now includes collaboration):
      * - Company Values (5%) - Manager assessment
-     * - Work Ethics (5%) - Auto (disciplinary records)
-     * - Accountability (5%) - Auto (task ownership)
-     * - Attitude Towards Work (5%) - Team Lead
-     * - Policy Compliance (5%) - Auto (attendance violations)
+     * - Attitude Towards Work (5%) - Team Lead  
+     * - Teamwork & Collaboration (5%) - Team Lead + Peer Feedback
+     * - Communication & Engagement (5%) - Auto (announcement reads, messaging)
+     * - Policy Compliance (5%) - Auto (attendance, punctuality)
      */
     private AuraDashboardDto.PillarDetail calculateCultureFitPillar(UUID employeeId) {
         AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
@@ -222,10 +217,12 @@ public class AuraDashboardService {
         pillar.setDataSource("mixed");
 
         LocalDate quarterStart = getQuarterStartDate();
+        OffsetDateTime quarterStartOdt = quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC);
+        
         List<WeeklyPerformanceReport> reports = weeklyReportRepository
             .findByEmployeeIdAndWeekStartDateAfter(employeeId, quarterStart);
 
-        // Attitude from Team Lead
+        // 1. Attitude from Team Lead (20% of pillar)
         double attitudeScore = 50.0;
         if (!reports.isEmpty()) {
             attitudeScore = reports.stream()
@@ -235,27 +232,39 @@ public class AuraDashboardService {
                 .orElse(2.5) * 20;
         }
 
-        // Work ethics (no disciplinary actions = 100%)
-        double workEthicsScore = 100.0; // Placeholder, would check disciplinary_actions table
+        // 2. Teamwork & Collaboration (20% of pillar - Team Lead + Peer Feedback)
+        double teamworkScore = 50.0;
+        if (!reports.isEmpty()) {
+            teamworkScore = reports.stream()
+                .filter(r -> r.getTeamworkCollaborationScore() != null)
+                .mapToInt(WeeklyPerformanceReport::getTeamworkCollaborationScore)
+                .average()
+                .orElse(2.5) * 20;
+        }
+        
+        // Boost teamwork with peer feedback if available
+        double peerScore = getPeerFeedbackScore(employeeId, quarterStartOdt);
+        if (peerScore > 0) {
+            teamworkScore = (teamworkScore + peerScore) / 2; // Average with peer feedback
+        }
 
-        // Accountability from task completion
-        OffsetDateTime quarterStartOdt = quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC);
-        long totalTasks = taskRepository.countByAssigneeIdAndCreatedAtAfter(employeeId, quarterStartOdt);
-        long completedTasks = taskRepository.countByAssigneeIdAndStatusAndCreatedAtAfter(employeeId, "Completed", quarterStartOdt);
-        double accountabilityScore = totalTasks > 0 ? (completedTasks * 100.0 / totalTasks) : 60.0;
+        // 3. Communication & Engagement (20% of pillar - Auto)
+        double engagementScore = getAnnouncementEngagementScore(employeeId, quarterStartOdt);
 
-        // Company values (manager assessment placeholder)
+        // 4. Company Values (20% of pillar - placeholder)
         double valuesScore = 70.0;
 
-        // Policy compliance from attendance
-        double complianceScore = 85.0; // Placeholder
+        // 5. Policy Compliance (20% of pillar - Auto from attendance)
+        long totalAttendance = attendanceRepository.countByUserIdAndCreatedAtAfter(employeeId, quarterStartOdt);
+        long presentCount = attendanceRepository.countByUserIdAndStatusAndCreatedAtAfter(employeeId, "present", quarterStartOdt);
+        double complianceScore = totalAttendance > 0 ? (presentCount * 100.0 / totalAttendance) : 70.0;
 
-        // Calculate weighted average
+        // Calculate weighted average (20% each component)
         double cultureFitScore = (
-            valuesScore * 0.2 +
-            workEthicsScore * 0.2 +
-            accountabilityScore * 0.2 +
             attitudeScore * 0.2 +
+            teamworkScore * 0.2 +
+            engagementScore * 0.2 +
+            valuesScore * 0.2 +
             complianceScore * 0.2
         );
 
@@ -263,6 +272,34 @@ public class AuraDashboardService {
         pillar.setContribution(Math.round(cultureFitScore * 0.25 * 100.0) / 100.0);
 
         return pillar;
+    }
+
+    /**
+     * Get peer feedback score for an employee (0-100)
+     */
+    private double getPeerFeedbackScore(UUID employeeId, OffsetDateTime quarterStart) {
+        try {
+            // Get peer feedback received this quarter
+            String quarter = "Q" + ((LocalDate.now().getMonthValue() - 1) / 3 + 1);
+            int year = LocalDate.now().getYear();
+            
+            List<PeerFeedback> feedback = peerFeedbackRepository
+                .findByToEmployeeIdAndQuarterAndYear(employeeId, quarter, year);
+            
+            if (feedback.isEmpty()) {
+                return 0.0; // No peer feedback
+            }
+            
+            // Average peer ratings (1-5 scale) converted to 0-100
+            double avgScore = feedback.stream()
+                .mapToInt(PeerFeedback::getSupportRating)
+                .average()
+                .orElse(3.0) * 20;
+            
+            return avgScore;
+        } catch (Exception e) {
+            return 0.0;
+        }
     }
 
     /**
