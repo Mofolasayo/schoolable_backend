@@ -73,9 +73,9 @@ public class PeerFeedbackController {
         feedback.setCommunicationRating(request.communicationRating());
         feedback.setStrengths(request.strengths());
         feedback.setAreasForImprovement(request.areasForImprovement());
-        feedback.setAnonymous(request.isAnonymous() != null ? request.isAnonymous() : true);
+        feedback.setIsAnonymous(request.isAnonymous() != null ? request.isAnonymous() : true);
         feedback.setStatus("submitted");
-        feedback.setCreatedAt(OffsetDateTime.now());
+        // createdAt is set automatically by @PrePersist
 
         peerFeedbackRepository.save(feedback);
 
