@@ -10,4 +10,5 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     boolean existsByEmailIgnoreCase(String email);
     java.util.List<Profile> findByRoleNot(String role);
     java.util.List<Profile> findByRole(String role);
+    java.util.List<Profile> findByDepartment(String department);
 }

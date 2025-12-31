@@ -12,5 +12,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     // Count methods for performance calculations
     long countByAssigneeIdAndCreatedAtAfter(UUID assigneeId, OffsetDateTime after);
     long countByAssigneeIdAndStatusAndCreatedAtAfter(UUID assigneeId, String status, OffsetDateTime after);
+    
+    List<Task> findByOrganizationOrderByCreatedAtDesc(String organization);
 }
 

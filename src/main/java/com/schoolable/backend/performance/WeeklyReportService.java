@@ -182,6 +182,12 @@ public class WeeklyReportService {
                 if (rating.getNotes() != null) {
                     report.setBehavioralNotes(rating.getNotes());
                 }
+                if (rating.getWeeklyHighlights() != null) {
+                    report.setWeeklyHighlights(rating.getWeeklyHighlights());
+                }
+                if (rating.getAreasForFocus() != null) {
+                    report.setAreasForFocus(rating.getAreasForFocus());
+                }
 
                 report.setStatus("submitted");
 

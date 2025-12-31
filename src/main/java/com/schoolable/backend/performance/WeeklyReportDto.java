@@ -427,6 +427,8 @@ public class WeeklyReportDto {
         private Integer attitudeTowardsWorkScore;
 
         private String notes;
+        private String weeklyHighlights;
+        private String areasForFocus;
 
         public String getEmployeeId() { return employeeId; }
         public void setEmployeeId(String employeeId) { this.employeeId = employeeId; }
@@ -445,6 +447,12 @@ public class WeeklyReportDto {
 
         public String getNotes() { return notes; }
         public void setNotes(String notes) { this.notes = notes; }
+
+        public String getWeeklyHighlights() { return weeklyHighlights; }
+        public void setWeeklyHighlights(String weeklyHighlights) { this.weeklyHighlights = weeklyHighlights; }
+
+        public String getAreasForFocus() { return areasForFocus; }
+        public void setAreasForFocus(String areasForFocus) { this.areasForFocus = areasForFocus; }
     }
 }
 

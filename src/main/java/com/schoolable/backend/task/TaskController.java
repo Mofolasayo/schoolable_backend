@@ -71,6 +71,32 @@ public class TaskController {
         return ResponseEntity.ok(result);
     }
 
+    @Operation(summary = "Get tasks for the current user's team (department)")
+    @GetMapping("/team")
+    public ResponseEntity<?> getTeamTasks(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        var profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+        }
+        
+        String department = profileOpt.get().getDepartment();
+        if (department == null || department.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "User does not belong to a department"));
+        }
+
+        List<Task> tasks = taskRepository.findByOrganizationOrderByCreatedAtDesc(department);
+        List<Map<String, Object>> result = tasks.stream()
+                .map(this::buildTaskResponse)
+                .toList();
+
+        return ResponseEntity.ok(result);
+    }
+
     @Operation(summary = "Get a single task with all details")
     @GetMapping("/{id}")
     public ResponseEntity<?> getTask(@PathVariable Long id, Authentication auth) {
