@@ -106,5 +106,21 @@ public class AuraDashboardController {
         );
         return ResponseEntity.ok(history);
     }
+
+    /**
+     * GET /api/performance/aura
+     * Get all employees with their Aura scores (for admin dashboard)
+     * Returns pillar breakdown, certificates count, etc.
+     */
+    @GetMapping("/aura")
+    public ResponseEntity<?> getAllEmployeesAura(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        
+        // Get all employees with their Aura data
+        var allEmployees = auraDashboardService.getAllEmployeesWithAura();
+        return ResponseEntity.ok(allEmployees);
+    }
 }
 

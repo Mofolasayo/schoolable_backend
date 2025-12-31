@@ -571,6 +571,68 @@ public class AuraDashboardService {
         if (score >= 50) return "D";
         return "F";
     }
+
+    /**
+     * Get all employees with their Aura scores and pillar breakdown.
+     * Used by the dashboard to display the Employees tab.
+     */
+    public List<Map<String, Object>> getAllEmployeesWithAura() {
+        List<Profile> allProfiles = profileRepository.findAll();
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Profile profile : allProfiles) {
+            try {
+                UUID employeeId = profile.getId();
+                Map<String, Object> employeeData = new HashMap<>();
+
+                // Basic profile info
+                employeeData.put("id", employeeId.toString());
+                employeeData.put("full_name", profile.getFullName());
+                employeeData.put("email", profile.getEmail());
+                employeeData.put("role", profile.getRole());
+                employeeData.put("department", profile.getDepartment());
+                employeeData.put("status", profile.getStatus() != null ? profile.getStatus() : "active");
+
+                // Calculate pillar scores
+                AuraDashboardDto.PillarDetail technical = calculateTechnicalPillar(employeeId);
+                AuraDashboardDto.PillarDetail behavioral = calculateBehavioralPillar(employeeId);
+                AuraDashboardDto.PillarDetail cultureFit = calculateCultureFitPillar(employeeId);
+                AuraDashboardDto.PillarDetail growth = calculateGrowthPillar(employeeId);
+
+                // Convert scores to 0-5 scale (from 0-100)
+                employeeData.put("technical_score", Math.round(technical.getScore() / 20.0 * 100.0) / 100.0);
+                employeeData.put("behavioral_score", Math.round(behavioral.getScore() / 20.0 * 100.0) / 100.0);
+                employeeData.put("culture_score", Math.round(cultureFit.getScore() / 20.0 * 100.0) / 100.0);
+                employeeData.put("growth_score", Math.round(growth.getScore() / 20.0 * 100.0) / 100.0);
+
+                // Calculate overall Aura score (4 pillars × 25% each)
+                double auraScore100 = 
+                    technical.getContribution() +
+                    behavioral.getContribution() +
+                    cultureFit.getContribution() +
+                    growth.getContribution();
+                
+                // Convert to 0-5 scale
+                double auraScore5 = auraScore100 / 20.0;
+                employeeData.put("aura_score", Math.round(auraScore5 * 100.0) / 100.0);
+                employeeData.put("grade", calculateGrade(auraScore100));
+
+                // Get certificates count (approved)
+                OffsetDateTime quarterStart = getQuarterStartDate();
+                String quarter = getCurrentQuarter();
+                int year = LocalDate.now().getYear();
+                long certsCount = trainingRecordRepository.countApprovedInQuarter(employeeId, quarter, year);
+                employeeData.put("certificates_count", certsCount);
+
+                result.add(employeeData);
+            } catch (Exception e) {
+                // Skip employees that fail to calculate
+                continue;
+            }
+        }
+
+        return result;
+    }
 }
 
 
