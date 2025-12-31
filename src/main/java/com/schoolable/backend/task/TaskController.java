@@ -43,7 +43,14 @@ public class TaskController {
     @Operation(summary = "Get all tasks with related data")
     @GetMapping
     public ResponseEntity<?> getAllTasks(Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
+        System.out.println("🤖 TaskController.getAllTasks reached");
+        if (auth == null) {
+            System.out.println("   ❌ Auth is NULL");
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        System.out.println("   ✅ Auth principal: " + auth.getPrincipal());
+        
+        if (auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
 
@@ -58,18 +65,20 @@ public class TaskController {
     @Operation(summary = "Get tasks assigned to the current user")
     @GetMapping("/assigned")
     public ResponseEntity<?> getMyTasks(Authentication auth) {
-        System.out.println("Processing getMyTasks (assigned)");
+        System.out.println("🤖 TaskController.getMyTasks reached");
         if (auth == null) {
-            System.out.println("Auth object is null");
+            System.out.println("   ❌ Auth is NULL");
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Auth is null)"));
         }
+        System.out.println("   ✅ Auth principal: " + auth.getPrincipal());
+
         if (auth.getPrincipal() == null) {
-            System.out.println("Principal is null");
+            System.out.println("   ❌ Principal is null");
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Principal is null)"));
         }
         
         UUID userId = (UUID) auth.getPrincipal();
-        System.out.println("Fetching tasks for user: " + userId);
+        System.out.println("   Fetching tasks for user: " + userId);
 
         List<Task> tasks = taskRepository.findByAssigneeIdOrderByCreatedAtDesc(userId);
         List<Map<String, Object>> result = tasks.stream()
@@ -124,7 +133,9 @@ public class TaskController {
     @PostMapping
     @Transactional
     public ResponseEntity<?> createTask(@RequestBody CreateTaskRequest req, Authentication auth) {
+        System.out.println("🤖 TaskController.createTask reached");
         if (auth == null || auth.getPrincipal() == null) {
+            System.out.println("   ❌ Auth/Principal is NULL");
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
         UUID userId = (UUID) auth.getPrincipal();
