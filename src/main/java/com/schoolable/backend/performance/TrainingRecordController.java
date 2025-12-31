@@ -63,7 +63,8 @@ public class TrainingRecordController {
             }
 
             // Upload file to storage
-            String fileUrl = storageService.uploadFile(file, "certificates/" + employeeId);
+            Map<String, Object> uploadResult = storageService.uploadFile(file, "certificates/" + employeeId);
+            String fileUrl = (String) uploadResult.get("url");
 
             // Create training record
             TrainingRecord record = new TrainingRecord();

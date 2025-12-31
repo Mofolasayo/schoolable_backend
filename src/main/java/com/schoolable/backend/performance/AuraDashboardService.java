@@ -618,7 +618,6 @@ public class AuraDashboardService {
                 employeeData.put("grade", calculateGrade(auraScore100));
 
                 // Get certificates count (approved)
-                OffsetDateTime quarterStart = getQuarterStartDate();
                 String quarter = getCurrentQuarter();
                 int year = LocalDate.now().getYear();
                 long certsCount = trainingRecordRepository.countApprovedInQuarter(employeeId, quarter, year);
