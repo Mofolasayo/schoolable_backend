@@ -10,6 +10,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
+import com.schoolable.backend.storage.StorageService;
 
 import java.sql.Date;
 import java.time.LocalDateTime;
@@ -28,9 +31,11 @@ import java.util.UUID;
 public class ProfileController {
 
     private final ProfileRepository profileRepository;
+    private final StorageService storageService;
 
-    public ProfileController(ProfileRepository profileRepository) {
+    public ProfileController(ProfileRepository profileRepository, StorageService storageService) {
         this.profileRepository = profileRepository;
+        this.storageService = storageService;
     }
 
     @Operation(summary = "Get current user profile")
@@ -170,6 +175,14 @@ public class ProfileController {
             p.setAddress(req.address());
             p.setCity(req.city());
             p.setState(req.state());
+            
+            if (req.isTeamLead() != null) {
+                p.setIsTeamLead(req.isTeamLead());
+            }
+            if (req.employeeLevel() != null) {
+                p.setEmployeeLevel(req.employeeLevel());
+            }
+
             p.setStatus("active");
             p.setProfileCompletedAt(OffsetDateTime.now());
             p.setUpdatedAt(OffsetDateTime.now());
@@ -182,6 +195,62 @@ public class ProfileController {
             System.out.println("   ❌ ERROR in completeProfile: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.status(500).body(Map.of("error", "Failed to complete profile: " + e.getMessage()));
+        }
+    }
+
+    @Operation(summary = "Update profile details")
+    @PostMapping("/update")
+    public ResponseEntity<?> updateProfile(Authentication auth, @RequestBody UpdateProfileRequest req) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        var profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+        }
+        var p = profileOpt.get();
+
+        if (req.fullName() != null) p.setFullName(req.fullName());
+        if (req.jobTitle() != null) p.setJobTitle(req.jobTitle());
+        if (req.phone() != null) p.setPhone(req.phone());
+        if (req.address() != null) p.setAddress(req.address());
+        if (req.city() != null) p.setCity(req.city());
+        if (req.state() != null) p.setState(req.state());
+
+        p.setUpdatedAt(OffsetDateTime.now());
+        profileRepository.save(p);
+
+        return ResponseEntity.ok(buildProfileResponse(p));
+    }
+
+    @Operation(summary = "Upload profile avatar")
+    @PostMapping("/avatar")
+    public ResponseEntity<?> uploadAvatar(Authentication auth, @RequestParam("avatar") MultipartFile file) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal(); // This cast assumes principal is UUID
+        
+        try {
+            // Upload file using StorageService
+            // Use a folder like "avatars/{userId}"
+            Map<String, Object> uploadResult = storageService.uploadFile(file, "avatars/" + userId);
+            String fileUrl = (String) uploadResult.get("url");
+            
+            var profileOpt = profileRepository.findById(userId);
+            if (profileOpt.isEmpty()) {
+                 return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+            }
+            var p = profileOpt.get();
+            p.setAvatarUrl(fileUrl);
+            p.setUpdatedAt(OffsetDateTime.now());
+            profileRepository.save(p);
+            
+            return ResponseEntity.ok(Map.of("message", "Avatar updated", "avatar_url", fileUrl));
+            
+        } catch (Exception e) {
+             return ResponseEntity.internalServerError().body(Map.of("error", "Failed to upload avatar: " + e.getMessage()));
         }
     }
 
@@ -283,6 +352,17 @@ public class ProfileController {
             String dateOfBirth, // yyyy-MM-dd
             String address,
             String city,
-            String state
+            String state,
+            Boolean isTeamLead,
+            Integer employeeLevel
+    ) {}
+
+    public record UpdateProfileRequest(
+        String fullName,
+        String jobTitle,
+        String phone,
+        String address,
+        String city,
+        String state
     ) {}
 }

@@ -56,12 +56,20 @@ public class TaskController {
     }
 
     @Operation(summary = "Get tasks assigned to the current user")
-    @GetMapping("/my")
+    @GetMapping("/assigned")
     public ResponseEntity<?> getMyTasks(Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        System.out.println("Processing getMyTasks (assigned)");
+        if (auth == null) {
+            System.out.println("Auth object is null");
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Auth is null)"));
         }
+        if (auth.getPrincipal() == null) {
+            System.out.println("Principal is null");
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Principal is null)"));
+        }
+        
         UUID userId = (UUID) auth.getPrincipal();
+        System.out.println("Fetching tasks for user: " + userId);
 
         List<Task> tasks = taskRepository.findByAssigneeIdOrderByCreatedAtDesc(userId);
         List<Map<String, Object>> result = tasks.stream()
