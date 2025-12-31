@@ -5,6 +5,7 @@ import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.task.TaskRepository;
 import com.schoolable.backend.attendance.AttendanceRepository;
 import com.schoolable.backend.messaging.MessageRepository;
+import com.schoolable.backend.announcement.AnnouncementReadRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +43,9 @@ public class AuraDashboardService {
 
     @Autowired
     private PeerFeedbackRepository peerFeedbackRepository;
+
+    @Autowired
+    private AnnouncementReadRepository announcementReadRepository;
 
     /**
      * Get the full Aura dashboard data for an employee.
@@ -321,7 +325,7 @@ public class AuraDashboardService {
      * - Communication (10%) - AUTO from messages
      * - Cross-Functional Work (5%) - placeholder (needs channel analysis)
      * - Peer Support (5%) - AUTO from peer_feedback table
-     * - Announcement Engagement (5%) - placeholder (needs announcement_views)
+     * - Announcement Engagement (5%) - AUTO from announcement_reads
      */
     private AuraDashboardDto.PillarDetail calculateCollaborationPillar(UUID employeeId) {
         AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
@@ -354,8 +358,8 @@ public class AuraDashboardService {
         // Peer Support (5%): From peer_feedback table
         double peerSupportScore = getPeerSupportScore(employeeId);
 
-        // Announcement Engagement (5%): (placeholder - would need announcement_views)
-        double engagementScore = 65.0;
+        // Announcement Engagement (5%): From announcement_reads table
+        double engagementScore = getAnnouncementEngagementScore(employeeId, quarterStartOdt);
 
         // Calculate weighted average
         // Communication = 10/25 = 40%, CrossFunc = 5/25 = 20%, PeerSupport = 5/25 = 20%, Engagement = 5/25 = 20%
@@ -448,6 +452,36 @@ public class AuraDashboardService {
         
         // Convert 1-5 rating to percentage
         return avgRating * 20;
+    }
+
+    /**
+     * Get announcement engagement score
+     * Based on percentage of announcements read this quarter
+     */
+    private double getAnnouncementEngagementScore(UUID employeeId, OffsetDateTime quarterStart) {
+        long totalAnnouncements = announcementReadRepository.countTotalAnnouncementsAfter(quarterStart);
+        
+        if (totalAnnouncements == 0) {
+            return 70.0; // Default if no announcements this quarter
+        }
+        
+        long readAnnouncements = announcementReadRepository.countByUserIdAndReadAtAfter(employeeId, quarterStart);
+        
+        // Calculate engagement percentage
+        double engagementRate = (double) readAnnouncements / totalAnnouncements * 100;
+        
+        // Score based on engagement rate
+        if (engagementRate >= 90) {
+            return 100.0;
+        } else if (engagementRate >= 70) {
+            return 85.0;
+        } else if (engagementRate >= 50) {
+            return 70.0;
+        } else if (engagementRate >= 30) {
+            return 55.0;
+        } else {
+            return 40.0;
+        }
     }
 
     // Helper methods
