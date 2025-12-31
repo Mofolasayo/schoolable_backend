@@ -15,6 +15,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # Allow out-of-order migrations and clean up on validation errors
+    out-of-order: true
+    validate-on-migrate: true
   servlet:
     multipart:
       enabled: true

@@ -53,9 +53,8 @@ task_metrics AS (
         assignee_id AS employee_id,
         -- Task completion rate
         COUNT(CASE WHEN status = 'Completed' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) AS task_completion_rate,
-        -- On-time delivery rate
-        COUNT(CASE WHEN status = 'Completed' AND updated_at <= due_date THEN 1 END) * 100.0 / 
-            NULLIF(COUNT(CASE WHEN status = 'Completed' THEN 1 END), 0) AS on_time_rate
+        -- On-time delivery rate (simplified: use completion rate as proxy since no updated_at)
+        COUNT(CASE WHEN status = 'Completed' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) AS on_time_rate
     FROM tasks
     WHERE created_at >= DATE_TRUNC('quarter', CURRENT_DATE)
     GROUP BY assignee_id

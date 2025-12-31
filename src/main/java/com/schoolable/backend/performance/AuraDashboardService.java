@@ -4,6 +4,7 @@ import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.task.TaskRepository;
 import com.schoolable.backend.attendance.AttendanceRepository;
+import com.schoolable.backend.messaging.MessageRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,8 @@ import java.util.*;
 /**
  * Service for calculating and retrieving Aura scores for employees.
  * Combines auto-calculated metrics with team lead weekly ratings.
+ * 
+ * V2: Updated with Training, Peer Feedback, and more auto-calculations.
  */
 @Service
 public class AuraDashboardService {
@@ -30,6 +33,15 @@ public class AuraDashboardService {
 
     @Autowired
     private AttendanceRepository attendanceRepository;
+
+    @Autowired
+    private MessageRepository messageRepository;
+
+    @Autowired
+    private TrainingRecordRepository trainingRecordRepository;
+
+    @Autowired
+    private PeerFeedbackRepository peerFeedbackRepository;
 
     /**
      * Get the full Aura dashboard data for an employee.
@@ -66,22 +78,12 @@ public class AuraDashboardService {
         AuraDashboardDto.PillarDetail cultureFit = calculateCultureFitPillar(employeeId);
         pillars.setCultureFit(cultureFit);
 
-        // Growth & Learning Pillar (Placeholder for now)
-        AuraDashboardDto.PillarDetail growth = new AuraDashboardDto.PillarDetail();
-        growth.setName("Growth & Learning");
-        growth.setScore(60.0); // Placeholder
-        growth.setWeight(25.0);
-        growth.setContribution(15.0);
-        growth.setDataSource("pending");
+        // Growth & Learning Pillar (V2: Now uses training records)
+        AuraDashboardDto.PillarDetail growth = calculateGrowthPillar(employeeId);
         pillars.setGrowthLearning(growth);
 
-        // Collaboration Pillar (Placeholder for now)
-        AuraDashboardDto.PillarDetail collaboration = new AuraDashboardDto.PillarDetail();
-        collaboration.setName("Collaboration");
-        collaboration.setScore(65.0); // Placeholder
-        collaboration.setWeight(25.0);
-        collaboration.setContribution(16.25);
-        collaboration.setDataSource("pending");
+        // Collaboration Pillar (partially auto-calculated)
+        AuraDashboardDto.PillarDetail collaboration = calculateCollaborationPillar(employeeId);
         pillars.setCollaboration(collaboration);
 
         response.setPillars(pillars);
@@ -313,6 +315,141 @@ public class AuraDashboardService {
         return history;
     }
 
+    /**
+     * Calculate Collaboration pillar (25%)
+     * V2 REVISED:
+     * - Communication (10%) - AUTO from messages
+     * - Cross-Functional Work (5%) - placeholder (needs channel analysis)
+     * - Peer Support (5%) - AUTO from peer_feedback table
+     * - Announcement Engagement (5%) - placeholder (needs announcement_views)
+     */
+    private AuraDashboardDto.PillarDetail calculateCollaborationPillar(UUID employeeId) {
+        AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
+        pillar.setName("Collaboration");
+        pillar.setWeight(25.0);
+        pillar.setDataSource("mixed");
+
+        LocalDate quarterStart = getQuarterStartDate();
+        OffsetDateTime quarterStartOdt = quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC);
+
+        // Communication score (10%): Based on messages sent this quarter
+        // Scoring: 0 = 20%, 1-9 = 40%, 10-29 = 60%, 30-59 = 80%, 60+ = 100%
+        long userMessages = messageRepository.countByUserIdAndCreatedAtAfter(employeeId, quarterStartOdt);
+        double communicationScore;
+        if (userMessages >= 60) {
+            communicationScore = 100.0;
+        } else if (userMessages >= 30) {
+            communicationScore = 80.0;
+        } else if (userMessages >= 10) {
+            communicationScore = 60.0;
+        } else if (userMessages > 0) {
+            communicationScore = 40.0;
+        } else {
+            communicationScore = 20.0;
+        }
+
+        // Cross-functional work (5%): (placeholder - would need channel_members analysis)
+        double crossFunctionalScore = 60.0;
+
+        // Peer Support (5%): From peer_feedback table
+        double peerSupportScore = getPeerSupportScore(employeeId);
+
+        // Announcement Engagement (5%): (placeholder - would need announcement_views)
+        double engagementScore = 65.0;
+
+        // Calculate weighted average
+        // Communication = 10/25 = 40%, CrossFunc = 5/25 = 20%, PeerSupport = 5/25 = 20%, Engagement = 5/25 = 20%
+        double collaborationScore = (
+            communicationScore * 0.4 +
+            crossFunctionalScore * 0.2 +
+            peerSupportScore * 0.2 +
+            engagementScore * 0.2
+        );
+
+        pillar.setScore(Math.round(collaborationScore * 100.0) / 100.0);
+        pillar.setContribution(Math.round(collaborationScore * 0.25 * 100.0) / 100.0);
+
+
+        return pillar;
+    }
+
+    /**
+     * Calculate Growth & Learning pillar (25%)
+     * Components:
+     * - Training Completion (10%) - AUTO from training_records
+     * - Skill Application (5%) - Task complexity increase (placeholder)
+     * - Knowledge Sharing (10%) - Announcements/docs created (placeholder)
+     */
+    private AuraDashboardDto.PillarDetail calculateGrowthPillar(UUID employeeId) {
+        AuraDashboardDto.PillarDetail pillar = new AuraDashboardDto.PillarDetail();
+        pillar.setName("Growth & Learning");
+        pillar.setWeight(25.0);
+        pillar.setDataSource("mixed");
+
+        LocalDate quarterStart = getQuarterStartDate();
+
+        // Training Completion: Count completed trainings this quarter
+        long completedTrainings = trainingRecordRepository.countCompletedTrainingsInPeriod(
+            employeeId, quarterStart);
+        
+        double trainingScore;
+        if (completedTrainings >= 5) {
+            trainingScore = 100.0;
+        } else if (completedTrainings >= 3) {
+            trainingScore = 80.0;
+        } else if (completedTrainings >= 1) {
+            trainingScore = 60.0;
+        } else {
+            trainingScore = 40.0;
+        }
+
+        // Skill Application (placeholder - would need task complexity analysis)
+        double skillApplicationScore = 60.0;
+
+        // Knowledge Sharing (placeholder - would need announcements/attachments count)
+        double knowledgeSharingScore = 60.0;
+
+        // Calculate weighted average (training is 40% of pillar, others 30% each)
+        double growthScore = (
+            trainingScore * 0.4 +            // 10/25 = 40%
+            skillApplicationScore * 0.2 +    // 5/25 = 20%
+            knowledgeSharingScore * 0.4      // 10/25 = 40%
+        );
+
+        pillar.setScore(Math.round(growthScore * 100.0) / 100.0);
+        pillar.setContribution(Math.round(growthScore * 0.25 * 100.0) / 100.0);
+
+        return pillar;
+    }
+
+    /**
+     * Get current quarter string (Q1, Q2, Q3, Q4)
+     */
+    private String getCurrentQuarter() {
+        int month = LocalDate.now().getMonthValue();
+        if (month <= 3) return "Q1";
+        if (month <= 6) return "Q2";
+        if (month <= 9) return "Q3";
+        return "Q4";
+    }
+
+    /**
+     * Get peer support score from peer feedback
+     */
+    private double getPeerSupportScore(UUID employeeId) {
+        String quarter = getCurrentQuarter();
+        int year = LocalDate.now().getYear();
+        
+        Double avgRating = peerFeedbackRepository.getOverallAverageRating(employeeId, quarter, year);
+        
+        if (avgRating == null) {
+            return 60.0; // Default if no peer feedback
+        }
+        
+        // Convert 1-5 rating to percentage
+        return avgRating * 20;
+    }
+
     // Helper methods
     private LocalDate getQuarterStartDate() {
         LocalDate now = LocalDate.now();
@@ -338,3 +475,5 @@ public class AuraDashboardService {
         return "F";
     }
 }
+
+
