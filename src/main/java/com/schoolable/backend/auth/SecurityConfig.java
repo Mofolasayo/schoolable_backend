@@ -44,11 +44,18 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(eh -> eh
                         .authenticationEntryPoint((req, res, ex) -> {
+                            System.out.println("❌ UNAUTHORIZED REQUEST to " + req.getRequestURI());
+                            System.out.println("   Method: " + req.getMethod());
+                            System.out.println("   Exception: " + ex.getMessage());
+                            System.out.println("   Headers: Authorization=" + (req.getHeader("Authorization") != null ? "Present" : "Missing"));
+                            
                             res.setStatus(HttpStatus.UNAUTHORIZED.value());
                             res.setContentType("application/json");
-                            res.getWriter().write("{\"error\":\"Unauthorized\"}");
+                            res.getWriter().write("{\"error\":\"Unauthorized: " + ex.getMessage() + "\"}");
                         })
                         .accessDeniedHandler((req, res, ex) -> {
+                            System.out.println("🚫 ACCESS DENIED to " + req.getRequestURI());
+                            
                             res.setStatus(HttpStatus.FORBIDDEN.value());
                             res.setContentType("application/json");
                             res.getWriter().write("{\"error\":\"Forbidden\"}");
@@ -105,17 +112,21 @@ public class SecurityConfig {
             String method = request.getMethod();
             String uri = request.getRequestURI();
             
-            System.out.println("🔐 JwtAuthFilter: " + method + " " + uri);
-            System.out.println("   Authorization header: " + (authHeader != null ? "Present (" + authHeader.length() + " chars)" : "MISSING"));
+            // Only log important endpoints to reduce noise
+            if (uri.contains("/tasks") || uri.contains("/profile")) {
+                System.out.println("🔐 JwtAuthFilter: " + method + " " + uri);
+                System.out.println("   Authorization header: " + (authHeader != null ? "Present (" + authHeader.length() + " chars)" : "MISSING"));
+            }
             
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 String token = authHeader.substring(7);
-                System.out.println("   Token extracted: " + token.substring(0, Math.min(20, token.length())) + "...");
                 try {
                     Claims claims = jwtService.parse(token);
                     UUID userId = UUID.fromString(claims.getSubject());
                     String role = claims.get("role", String.class);
-                    System.out.println("   ✅ JWT parsed successfully: userId=" + userId + ", role=" + role);
+                    if (uri.contains("/tasks") || uri.contains("/profile")) {
+                        System.out.println("   ✅ JWT parsed successfully: userId=" + userId);
+                    }
                     var auth = new UsernamePasswordAuthenticationToken(
                             userId,
                             null,
@@ -124,13 +135,12 @@ public class SecurityConfig {
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 } catch (Exception e) {
                     System.out.println("   ❌ JWT parse FAILED: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                    response.setStatus(HttpStatus.UNAUTHORIZED.value());
-                    response.setContentType("application/json");
-                    response.getWriter().write("{\"error\":\"Invalid or expired token\"}");
-                    return;
+                    // Don't return here, let the entry point handle it for meaningful 401s
                 }
             } else {
-                System.out.println("   ⚠️ No Bearer token in request");
+                if (uri.contains("/tasks") || uri.contains("/profile")) {
+                    System.out.println("   ⚠️ No Bearer token in request");
+                }
             }
             filterChain.doFilter(request, response);
         }
