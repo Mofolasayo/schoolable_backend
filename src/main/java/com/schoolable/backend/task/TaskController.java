@@ -63,29 +63,36 @@ public class TaskController {
     }
 
     @Operation(summary = "Get tasks assigned to the current user")
+    @Operation(summary = "Get tasks assigned to the current user")
     @GetMapping("/assigned")
     public ResponseEntity<?> getMyTasks(Authentication auth) {
         System.out.println("🤖 TaskController.getMyTasks reached");
-        if (auth == null) {
-            System.out.println("   ❌ Auth is NULL");
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Auth is null)"));
+        try {
+            if (auth == null) {
+                System.out.println("   ❌ Auth is NULL");
+                return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Auth is null)"));
+            }
+            if (auth.getPrincipal() == null) {
+                System.out.println("   ❌ Principal is null");
+                return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Principal is null)"));
+            }
+            
+            UUID userId = (UUID) auth.getPrincipal();
+            System.out.println("   Fetching tasks for user: " + userId);
+
+            List<Task> tasks = taskRepository.findByAssigneeIdOrderByCreatedAtDesc(userId);
+            System.out.println("   ✅ Tasks found: " + tasks.size());
+            
+            List<Map<String, Object>> result = tasks.stream()
+                    .map(this::buildTaskResponse)
+                    .toList();
+
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            System.out.println("   ❌ ERROR in getMyTasks: " + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Error: " + e.getMessage()));
         }
-        System.out.println("   ✅ Auth principal: " + auth.getPrincipal());
-
-        if (auth.getPrincipal() == null) {
-            System.out.println("   ❌ Principal is null");
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Principal is null)"));
-        }
-        
-        UUID userId = (UUID) auth.getPrincipal();
-        System.out.println("   Fetching tasks for user: " + userId);
-
-        List<Task> tasks = taskRepository.findByAssigneeIdOrderByCreatedAtDesc(userId);
-        List<Map<String, Object>> result = tasks.stream()
-                .map(this::buildTaskResponse)
-                .toList();
-
-        return ResponseEntity.ok(result);
     }
 
     @Operation(summary = "Get tasks for the current user's team (department)")
