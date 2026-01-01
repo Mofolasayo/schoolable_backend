@@ -118,6 +118,7 @@ public ResponseEntity<?> debugToken(@RequestParam("token") String token) {
         response.put("address", p.getAddress() != null ? p.getAddress() : "");
         response.put("city", p.getCity() != null ? p.getCity() : "");
         response.put("state", p.getState() != null ? p.getState() : "");
+        response.put("is_team_lead", p.getIsTeamLead() != null ? p.getIsTeamLead() : false);
         if (p.getDateOfBirth() != null) {
             response.put("date_of_birth", p.getDateOfBirth().toString());
         }
@@ -132,6 +133,7 @@ public ResponseEntity<?> debugToken(@RequestParam("token") String token) {
         }
         return response;
     }
+
 
     @Operation(summary = "Verify email with token")
     @PostMapping("/verify-email")
