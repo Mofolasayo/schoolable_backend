@@ -324,6 +324,58 @@ public class ProfileController {
     }
 
     /**
+     * Delete your own account.
+     * This permanently deletes the authenticated user's profile and all associated data.
+     * Admins cannot delete themselves using this endpoint for safety.
+     */
+    @Operation(summary = "Delete your own account")
+    @DeleteMapping("/me")
+    public ResponseEntity<?> deleteMyAccount(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        
+        UUID userId = (UUID) auth.getPrincipal();
+        
+        // Get the user's profile
+        var profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+        }
+        
+        Profile profile = profileOpt.get();
+        
+        // Prevent admins from deleting themselves via this endpoint
+        if ("admin".equalsIgnoreCase(profile.getRole())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Admin accounts cannot be self-deleted. Please contact a super admin."
+            ));
+        }
+        
+        String deletedName = profile.getFullName();
+        String deletedEmail = profile.getEmail();
+        
+        try {
+            // Delete the profile
+            profileRepository.deleteById(userId);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Your account has been deleted successfully",
+                "deleted_user", Map.of(
+                    "id", userId.toString(),
+                    "full_name", deletedName != null ? deletedName : "",
+                    "email", deletedEmail != null ? deletedEmail : ""
+                )
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", "Failed to delete account: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
      * Build a null-safe profile response map.
      * Using HashMap instead of Map.of() because Map.of() throws NPE for null values.
      * Auto-generates avatar_url using DiceBear if not set.
