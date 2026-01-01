@@ -1,5 +1,6 @@
 package com.schoolable.backend.teamlead;
 
+import com.schoolable.backend.performance.AuraDashboardDto.EmployeeAuraResponse;
 import com.schoolable.backend.performance.AuraDashboardService;
 import com.schoolable.backend.performance.WeeklyReportRepository;
 import com.schoolable.backend.profile.Profile;
@@ -123,9 +124,9 @@ public class TeamLeadController {
             int membersWithAura = 0;
             for (Profile member : teamMembers) {
                 try {
-                    Map<String, Object> auraData = auraDashboardService.getEmployeeAuraDashboard(member.getId());
-                    if (auraData != null && auraData.get("overallScore") != null) {
-                        totalAura += ((Number) auraData.get("overallScore")).doubleValue();
+                    EmployeeAuraResponse auraData = auraDashboardService.getEmployeeAuraDashboard(member.getId());
+                    if (auraData != null && auraData.getAuraScore() != null) {
+                        totalAura += auraData.getAuraScore();
                         membersWithAura++;
                     }
                 } catch (Exception ignored) {
@@ -247,11 +248,11 @@ public class TeamLeadController {
                 
                 // Aura score and pillars
                 try {
-                    Map<String, Object> auraData = auraDashboardService.getEmployeeAuraDashboard(member.getId());
+                    EmployeeAuraResponse auraData = auraDashboardService.getEmployeeAuraDashboard(member.getId());
                     if (auraData != null) {
-                        memberInfo.put("aura_score", auraData.get("overallScore"));
-                        memberInfo.put("aura_grade", auraData.get("grade"));
-                        memberInfo.put("pillars", auraData.get("pillars"));
+                        memberInfo.put("aura_score", auraData.getAuraScore());
+                        memberInfo.put("aura_grade", auraData.getGrade());
+                        memberInfo.put("pillars", auraData.getPillars());
                     } else {
                         memberInfo.put("aura_score", null);
                         memberInfo.put("aura_grade", "N/A");
