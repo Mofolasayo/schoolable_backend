@@ -182,7 +182,9 @@ public class TeamLeadController {
      */
     @Operation(summary = "Get team members with Aura scores")
     @GetMapping("/team-members")
-    public ResponseEntity<?> getTeamMembers(Authentication auth) {
+    public ResponseEntity<?> getTeamMembers(
+            Authentication auth,
+            @RequestParam(required = false, defaultValue = "true") boolean includeSelf) {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
@@ -213,10 +215,10 @@ public class TeamLeadController {
             int currentWeek = now.get(WeekFields.ISO.weekOfYear());
             int currentYear = now.getYear();
             
-            // Get team members (same department, excluding self)
+            // Get team members (same department, optionally including self)
             List<Profile> teamMembers = profileRepository.findByDepartment(department)
                     .stream()
-                    .filter(p -> !p.getId().equals(teamLeadId))
+                    .filter(p -> includeSelf || !p.getId().equals(teamLeadId))
                     .collect(Collectors.toList());
             
             // Build response for each team member
@@ -233,6 +235,7 @@ public class TeamLeadController {
                 memberInfo.put("department", member.getDepartment());
                 memberInfo.put("status", member.getStatus());
                 memberInfo.put("employee_id", member.getEmployeeId());
+                memberInfo.put("is_team_lead", Boolean.TRUE.equals(member.getIsTeamLead()));
                 
                 // Generate avatar URL
                 String avatarUrl = member.getAvatarUrl();
