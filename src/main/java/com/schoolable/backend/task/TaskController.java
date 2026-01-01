@@ -63,7 +63,7 @@ public class TaskController {
     }
 
     @Operation(summary = "Get tasks assigned to the current user")
-    @Operation(summary = "Get tasks assigned to the current user")
+
     @GetMapping("/assigned")
     public ResponseEntity<?> getMyTasks(Authentication auth) {
         System.out.println("🤖 TaskController.getMyTasks reached");
