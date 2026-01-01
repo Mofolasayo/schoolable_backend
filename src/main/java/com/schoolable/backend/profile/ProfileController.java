@@ -5,7 +5,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -251,6 +253,73 @@ public class ProfileController {
             
         } catch (Exception e) {
              return ResponseEntity.internalServerError().body(Map.of("error", "Failed to upload avatar: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete a staff profile (Admin only).
+     * This permanently deletes the user's profile and all associated data.
+     * Admins cannot delete themselves.
+     */
+    @Operation(summary = "Delete a staff profile (Admin only)")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteProfile(Authentication auth, @PathVariable UUID id) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        
+        UUID adminId = (UUID) auth.getPrincipal();
+        
+        // Get the admin's profile to verify they have permission
+        var adminProfileOpt = profileRepository.findById(adminId);
+        if (adminProfileOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Admin profile not found"));
+        }
+        
+        Profile adminProfile = adminProfileOpt.get();
+        
+        // Only admins can delete profiles
+        if (!"admin".equalsIgnoreCase(adminProfile.getRole())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Access denied. Only admins can delete profiles."));
+        }
+        
+        // Prevent admins from deleting themselves
+        if (adminId.equals(id)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "You cannot delete your own profile"));
+        }
+        
+        // Check if the profile to delete exists
+        var profileToDeleteOpt = profileRepository.findById(id);
+        if (profileToDeleteOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+        }
+        
+        Profile profileToDelete = profileToDeleteOpt.get();
+        String deletedName = profileToDelete.getFullName();
+        String deletedEmail = profileToDelete.getEmail();
+        
+        // Prevent deletion of other admins
+        if ("admin".equalsIgnoreCase(profileToDelete.getRole())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Cannot delete admin profiles"));
+        }
+        
+        try {
+            // Delete the profile
+            profileRepository.deleteById(id);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Profile deleted successfully",
+                "deleted_user", Map.of(
+                    "id", id.toString(),
+                    "full_name", deletedName != null ? deletedName : "",
+                    "email", deletedEmail != null ? deletedEmail : ""
+                )
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", "Failed to delete profile: " + e.getMessage()
+            ));
         }
     }
 
