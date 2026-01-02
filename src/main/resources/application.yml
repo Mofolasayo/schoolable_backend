@@ -46,3 +46,8 @@ cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME:}
   api-key: ${CLOUDINARY_API_KEY:}
   api-secret: ${CLOUDINARY_API_SECRET:}
+
+# Gemini AI configuration for KPI insights
+gemini:
+  api:
+    key: ${GEMINI_API_KEY:AIzaSyBu8oPRazR8zn1A0DLmgBjVIl6KaSN5UZE}

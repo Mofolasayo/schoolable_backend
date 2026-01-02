@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface ProfileRepository extends JpaRepository<Profile, UUID> {
+    Optional<Profile> findByEmail(String email);
     Optional<Profile> findByEmailIgnoreCase(String email);
     boolean existsByEmailIgnoreCase(String email);
     java.util.List<Profile> findByRoleNot(String role);

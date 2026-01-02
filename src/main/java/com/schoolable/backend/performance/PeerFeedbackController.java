@@ -1,5 +1,7 @@
 package com.schoolable.backend.performance;
 
+import com.schoolable.backend.profile.Profile;
+import com.schoolable.backend.profile.ProfileRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,8 +10,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/performance/peer-feedback")
@@ -18,6 +20,9 @@ public class PeerFeedbackController {
 
     @Autowired
     private PeerFeedbackRepository peerFeedbackRepository;
+
+    @Autowired
+    private ProfileRepository profileRepository;
 
     /**
      * Submit peer feedback for a colleague
@@ -46,9 +51,9 @@ public class PeerFeedbackController {
             return ResponseEntity.badRequest().body(Map.of("error", "Cannot submit feedback for yourself"));
         }
 
-        // Get current quarter
-        String quarter = getCurrentQuarter();
-        int year = LocalDate.now().getYear();
+        // Get current quarter or use provided
+        String quarter = request.quarter() != null ? request.quarter() : getCurrentQuarter();
+        int year = request.year() != null ? request.year() : LocalDate.now().getYear();
 
         // Check if already submitted for this quarter
         List<PeerFeedback> existing = peerFeedbackRepository
@@ -71,15 +76,73 @@ public class PeerFeedbackController {
         feedback.setSupportRating(request.supportRating());
         feedback.setCollaborationRating(request.collaborationRating());
         feedback.setCommunicationRating(request.communicationRating());
+        
+        // New rating fields
+        feedback.setAdaptabilityRating(request.adaptabilityRating());
+        feedback.setValuesRating(request.valuesRating());
+        feedback.setAccountabilityRating(request.accountabilityRating());
+        feedback.setFeedbackRating(request.feedbackRating());
+        
+        // Leadership ratings (for rating team leads)
+        feedback.setOrgGuidanceRating(request.orgGuidanceRating());
+        feedback.setPeopleCultureRating(request.peopleCultureRating());
+        feedback.setInfluenceRating(request.influenceRating());
+        
         feedback.setStrengths(request.strengths());
         feedback.setAreasForImprovement(request.areasForImprovement());
         feedback.setIsAnonymous(request.isAnonymous() != null ? request.isAnonymous() : true);
         feedback.setStatus("submitted");
-        // createdAt is set automatically by @PrePersist
 
         peerFeedbackRepository.save(feedback);
 
         return ResponseEntity.ok(Map.of("success", true, "id", feedback.getId()));
+    }
+
+    /**
+     * Get peer feedback submission status for current quarter
+     */
+    @Operation(summary = "Get peer feedback status")
+    @GetMapping("/status")
+    public ResponseEntity<?> getPeerFeedbackStatus(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        UUID userId = (UUID) auth.getPrincipal();
+        Profile profile = profileRepository.findById(userId).orElse(null);
+        if (profile == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Profile not found"));
+        }
+
+        String quarter = getCurrentQuarter();
+        int year = LocalDate.now().getYear();
+
+        // Get team members in same department
+        List<Profile> teamMembers = profileRepository.findByDepartment(profile.getDepartment());
+        
+        // Filter out self and get feedback status
+        List<Map<String, Object>> memberStatus = teamMembers.stream()
+            .filter(m -> !m.getId().equals(userId))
+            .map(m -> {
+                boolean submitted = peerFeedbackRepository.existsByFromEmployeeIdAndToEmployeeIdAndQuarterAndYear(
+                    userId, m.getId(), quarter, year);
+                return Map.<String, Object>of(
+                    "id", m.getId().toString(),
+                    "name", m.getFullName(),
+                    "submitted", submitted
+                );
+            })
+            .collect(Collectors.toList());
+
+        long submittedCount = memberStatus.stream().filter(m -> (boolean) m.get("submitted")).count();
+
+        return ResponseEntity.ok(Map.of(
+            "quarter", quarter,
+            "year", year,
+            "submittedCount", submittedCount,
+            "pendingCount", memberStatus.size() - submittedCount,
+            "teamMembers", memberStatus
+        ));
     }
 
     /**
@@ -115,16 +178,59 @@ public class PeerFeedbackController {
                     .mapToInt(PeerFeedback::getCollaborationRating)
                     .average()
                     .orElse(avgSupport);
-            double avgComm = feedback.stream()
-                    .filter(f -> f.getCommunicationRating() != null)
-                    .mapToInt(PeerFeedback::getCommunicationRating)
+            double avgAdaptability = feedback.stream()
+                    .filter(f -> f.getAdaptabilityRating() != null)
+                    .mapToInt(PeerFeedback::getAdaptabilityRating)
+                    .average()
+                    .orElse(avgSupport);
+            double avgValues = feedback.stream()
+                    .filter(f -> f.getValuesRating() != null)
+                    .mapToInt(PeerFeedback::getValuesRating)
+                    .average()
+                    .orElse(avgSupport);
+            double avgAccountability = feedback.stream()
+                    .filter(f -> f.getAccountabilityRating() != null)
+                    .mapToInt(PeerFeedback::getAccountabilityRating)
+                    .average()
+                    .orElse(avgSupport);
+            double avgFeedbackOpenness = feedback.stream()
+                    .filter(f -> f.getFeedbackRating() != null)
+                    .mapToInt(PeerFeedback::getFeedbackRating)
                     .average()
                     .orElse(avgSupport);
             
-            summary.put("averageSupportRating", Math.round(avgSupport * 100.0) / 100.0);
-            summary.put("averageCollaborationRating", Math.round(avgCollab * 100.0) / 100.0);
-            summary.put("averageCommunicationRating", Math.round(avgComm * 100.0) / 100.0);
-            summary.put("overallAverage", Math.round((avgSupport + avgCollab + avgComm) / 3 * 100.0) / 100.0);
+            summary.put("averages", Map.of(
+                "supportRating", Math.round(avgSupport * 10.0) / 10.0,
+                "collaborationRating", Math.round(avgCollab * 10.0) / 10.0,
+                "adaptabilityRating", Math.round(avgAdaptability * 10.0) / 10.0,
+                "valuesRating", Math.round(avgValues * 10.0) / 10.0,
+                "accountabilityRating", Math.round(avgAccountability * 10.0) / 10.0,
+                "feedbackRating", Math.round(avgFeedbackOpenness * 10.0) / 10.0,
+                "overallRating", Math.round((avgSupport + avgCollab + avgAdaptability + avgValues + avgAccountability + avgFeedbackOpenness) / 6 * 10.0) / 10.0
+            ));
+
+            // Collect strengths and areas (anonymized)
+            List<String> strengths = feedback.stream()
+                .map(PeerFeedback::getStrengths)
+                .filter(s -> s != null && !s.isEmpty())
+                .collect(Collectors.toList());
+
+            List<String> areasForImprovement = feedback.stream()
+                .map(PeerFeedback::getAreasForImprovement)
+                .filter(s -> s != null && !s.isEmpty())
+                .collect(Collectors.toList());
+
+            summary.put("strengths", strengths);
+            summary.put("areasForImprovement", areasForImprovement);
+        } else {
+            summary.put("averages", Map.of(
+                "supportRating", 0,
+                "collaborationRating", 0,
+                "adaptabilityRating", 0,
+                "overallRating", 0
+            ));
+            summary.put("strengths", Collections.emptyList());
+            summary.put("areasForImprovement", Collections.emptyList());
         }
 
         return ResponseEntity.ok(summary);
@@ -152,7 +258,10 @@ public class PeerFeedbackController {
             item.put("toEmployeeId", f.getToEmployeeId());
             item.put("supportRating", f.getSupportRating());
             item.put("collaborationRating", f.getCollaborationRating());
-            item.put("communicationRating", f.getCommunicationRating());
+            item.put("adaptabilityRating", f.getAdaptabilityRating());
+            item.put("valuesRating", f.getValuesRating());
+            item.put("accountabilityRating", f.getAccountabilityRating());
+            item.put("feedbackRating", f.getFeedbackRating());
             item.put("createdAt", f.getCreatedAt());
             return item;
         }).toList();
@@ -172,12 +281,21 @@ public class PeerFeedbackController {
         return "Q4";
     }
 
-    // Request DTO
+    // Request DTO with all new rating fields
     public record PeerFeedbackRequest(
             UUID toEmployeeId,
+            String quarter,
+            Integer year,
             int supportRating,
             Integer collaborationRating,
             Integer communicationRating,
+            Integer adaptabilityRating,
+            Integer valuesRating,
+            Integer accountabilityRating,
+            Integer feedbackRating,
+            Integer orgGuidanceRating,
+            Integer peopleCultureRating,
+            Integer influenceRating,
             String strengths,
             String areasForImprovement,
             Boolean isAnonymous

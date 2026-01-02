@@ -6,7 +6,13 @@ import java.util.UUID;
 
 /**
  * Entity for peer-to-peer feedback.
- * Used for Collaboration pillar calculation (Peer Support criterion).
+ * Used for calculating sub-metrics that require peer input.
+ * 
+ * Rating fields cover:
+ * - Behavioral: adaptability
+ * - Culture Fit: company values, accountability
+ * - Growth: openness to feedback
+ * - Leadership (for team leads): org guidance, people leadership, influence
  */
 @Entity
 @Table(name = "peer_feedback")
@@ -28,8 +34,9 @@ public class PeerFeedback {
     @Column(nullable = false)
     private Integer year;
 
+    // ============ EXISTING RATINGS ============
     @Column(name = "support_rating", nullable = false)
-    private Integer supportRating; // 1-5
+    private Integer supportRating; // 1-5 (Teamwork)
 
     @Column(name = "collaboration_rating")
     private Integer collaborationRating; // 1-5
@@ -37,6 +44,32 @@ public class PeerFeedback {
     @Column(name = "communication_rating")
     private Integer communicationRating; // 1-5
 
+    // ============ NEW: BEHAVIORAL SUB-METRICS ============
+    @Column(name = "adaptability_rating")
+    private Integer adaptabilityRating; // 1-5
+
+    // ============ NEW: CULTURE FIT SUB-METRICS ============
+    @Column(name = "values_rating")
+    private Integer valuesRating; // 1-5 (Adherence to Company Values)
+
+    @Column(name = "accountability_rating")
+    private Integer accountabilityRating; // 1-5 (Accountability & Ownership)
+
+    // ============ NEW: GROWTH SUB-METRICS ============
+    @Column(name = "feedback_rating")
+    private Integer feedbackRating; // 1-5 (Openness to Feedback)
+
+    // ============ NEW: LEADERSHIP SUB-METRICS (for rating team leads) ============
+    @Column(name = "org_guidance_rating")
+    private Integer orgGuidanceRating; // 1-5 (Organizational Guidance)
+
+    @Column(name = "people_culture_rating")
+    private Integer peopleCultureRating; // 1-5 (People & Culture Leadership)
+
+    @Column(name = "influence_rating")
+    private Integer influenceRating; // 1-5 (Leadership Influence)
+
+    // ============ TEXT FEEDBACK ============
     @Column(columnDefinition = "TEXT")
     private String strengths;
 
@@ -56,7 +89,7 @@ public class PeerFeedback {
         createdAt = OffsetDateTime.now();
     }
 
-    // Getters and Setters
+    // ============ GETTERS AND SETTERS ============
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -81,6 +114,27 @@ public class PeerFeedback {
     public Integer getCommunicationRating() { return communicationRating; }
     public void setCommunicationRating(Integer communicationRating) { this.communicationRating = communicationRating; }
 
+    public Integer getAdaptabilityRating() { return adaptabilityRating; }
+    public void setAdaptabilityRating(Integer adaptabilityRating) { this.adaptabilityRating = adaptabilityRating; }
+
+    public Integer getValuesRating() { return valuesRating; }
+    public void setValuesRating(Integer valuesRating) { this.valuesRating = valuesRating; }
+
+    public Integer getAccountabilityRating() { return accountabilityRating; }
+    public void setAccountabilityRating(Integer accountabilityRating) { this.accountabilityRating = accountabilityRating; }
+
+    public Integer getFeedbackRating() { return feedbackRating; }
+    public void setFeedbackRating(Integer feedbackRating) { this.feedbackRating = feedbackRating; }
+
+    public Integer getOrgGuidanceRating() { return orgGuidanceRating; }
+    public void setOrgGuidanceRating(Integer orgGuidanceRating) { this.orgGuidanceRating = orgGuidanceRating; }
+
+    public Integer getPeopleCultureRating() { return peopleCultureRating; }
+    public void setPeopleCultureRating(Integer peopleCultureRating) { this.peopleCultureRating = peopleCultureRating; }
+
+    public Integer getInfluenceRating() { return influenceRating; }
+    public void setInfluenceRating(Integer influenceRating) { this.influenceRating = influenceRating; }
+
     public String getStrengths() { return strengths; }
     public void setStrengths(String strengths) { this.strengths = strengths; }
 
@@ -95,3 +149,4 @@ public class PeerFeedback {
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
 }
+
