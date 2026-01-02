@@ -213,7 +213,7 @@ public class PersonalInsightsService {
             data.get("improvements")
         );
 
-        return geminiService.callGeminiApi(prompt);
+        return geminiService.generateContent(prompt);
     }
 
     private Map<String, Object> parsePersonalInsights(String aiResponse, Map<String, Object> performanceData, Profile profile) {

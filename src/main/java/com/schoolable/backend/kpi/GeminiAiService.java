@@ -60,6 +60,13 @@ public class GeminiAiService {
     }
 
     /**
+     * Generate content from a custom prompt (public wrapper for callGeminiApi)
+     */
+    public String generateContent(String prompt) {
+        return callGeminiApi(prompt);
+    }
+
+    /**
      * Build the weekly analysis prompt
      */
     private String buildWeeklyAnalysisPrompt(
