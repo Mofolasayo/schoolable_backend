@@ -286,7 +286,7 @@ public class AutoAuraCalculationService {
                     .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()) || 
                                 "Done".equalsIgnoreCase(t.getStatus()))
                     .filter(t -> t.getDueDate() != null && t.getUpdatedAt() != null)
-                    .filter(t -> !t.getUpdatedAt().toLocalDate().isAfter(t.getDueDate()))
+                    .filter(t -> !t.getUpdatedAt().toLocalDate().isAfter(t.getDueDate().toLocalDate()))
                     .count();
                 long totalCompleted = quarterTasks.stream()
                     .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()) || 
