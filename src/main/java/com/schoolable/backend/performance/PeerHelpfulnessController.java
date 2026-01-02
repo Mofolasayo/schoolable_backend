@@ -103,7 +103,7 @@ public class PeerHelpfulnessController {
                 rating.setYear(year);
                 rating.setRating(ir.rating());
                 rating.setComment(ir.comment());
-                rating.setOrganization(raterProfile.getOrganization());
+                rating.setOrganization(raterProfile.getDepartment()); // Use department as org
             }
 
             savedRatings.add(helpfulnessRepository.save(rating));
@@ -150,8 +150,8 @@ public class PeerHelpfulnessController {
             year = now.getYear();
         }
 
-        // Get colleagues from same organization
-        List<Profile> colleagues = profileRepository.findByOrganization(profile.getOrganization())
+        // Get colleagues from same department
+        List<Profile> colleagues = profileRepository.findByDepartment(profile.getDepartment())
             .stream()
             .filter(p -> !p.getId().equals(userId))
             .filter(p -> "approved".equalsIgnoreCase(p.getStatus()))
@@ -169,8 +169,12 @@ public class PeerHelpfulnessController {
             .map(c -> {
                 Map<String, Object> data = new HashMap<>();
                 data.put("id", c.getId());
-                data.put("firstName", c.getFirstName());
-                data.put("lastName", c.getLastName());
+                // Parse fullName into firstName/lastName for frontend compatibility
+                String fullName = c.getFullName() != null ? c.getFullName() : "";
+                String[] nameParts = fullName.split(" ", 2);
+                data.put("firstName", nameParts.length > 0 ? nameParts[0] : "");
+                data.put("lastName", nameParts.length > 1 ? nameParts[1] : "");
+                data.put("fullName", fullName);
                 data.put("email", c.getEmail());
                 data.put("department", c.getDepartment());
                 data.put("jobTitle", c.getJobTitle());
@@ -263,8 +267,8 @@ public class PeerHelpfulnessController {
         int weekNumber = now.get(WeekFields.ISO.weekOfYear());
         int year = now.getYear();
 
-        // Count colleagues
-        long colleagueCount = profileRepository.findByOrganization(profile.getOrganization())
+        // Count colleagues from same department
+        long colleagueCount = profileRepository.findByDepartment(profile.getDepartment())
             .stream()
             .filter(p -> !p.getId().equals(userId))
             .filter(p -> "approved".equalsIgnoreCase(p.getStatus()))

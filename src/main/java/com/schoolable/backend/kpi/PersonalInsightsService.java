@@ -158,7 +158,7 @@ public class PersonalInsightsService {
         data.put("strengths", strengths);
         data.put("improvements", improvements);
         data.put("department", profile.getDepartment());
-        data.put("employeeName", profile.getFirstName() + " " + profile.getLastName());
+        data.put("employeeName", profile.getFullName());
 
         return data;
     }
@@ -196,7 +196,8 @@ public class PersonalInsightsService {
             Be specific, constructive, and encouraging. Focus on actionable advice.
             Return ONLY valid JSON, no markdown.
             """,
-            profile.getFirstName(), profile.getLastName(),
+            profile.getFullName() != null ? profile.getFullName().split(" ")[0] : "", 
+            profile.getFullName() != null && profile.getFullName().contains(" ") ? profile.getFullName().substring(profile.getFullName().indexOf(" ") + 1) : "",
             profile.getDepartment(),
             (double) data.get("completionRate"),
             (long) data.get("completedTasks"),
@@ -212,14 +213,14 @@ public class PersonalInsightsService {
             data.get("improvements")
         );
 
-        return geminiService.generateContent(prompt);
+        return geminiService.callGeminiApi(prompt);
     }
 
     private Map<String, Object> parsePersonalInsights(String aiResponse, Map<String, Object> performanceData, Profile profile) {
         Map<String, Object> result = new HashMap<>();
         
         result.put("employeeId", profile.getId());
-        result.put("employeeName", profile.getFirstName() + " " + profile.getLastName());
+        result.put("employeeName", profile.getFullName());
         result.put("department", profile.getDepartment());
         result.put("generatedAt", OffsetDateTime.now());
         result.put("performanceData", performanceData);

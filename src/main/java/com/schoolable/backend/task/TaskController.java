@@ -469,7 +469,7 @@ public class TaskController {
                     // Get assignee name
                     if (task.getAssigneeId() != null) {
                         profileRepository.findById(task.getAssigneeId()).ifPresent(profile -> 
-                            taskInfo.put("assigneeName", profile.getFirstName() + " " + profile.getLastName())
+                            taskInfo.put("assigneeName", profile.getFullName())
                         );
                     }
                     return taskInfo;
