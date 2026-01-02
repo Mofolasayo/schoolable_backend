@@ -264,6 +264,14 @@ public class TaskController {
             }
         }
 
+        // Track first response time - when assignee first updates the task
+        UUID userId = (UUID) auth.getPrincipal();
+        if (task.getFirstResponseAt() == null && 
+            task.getAssigneeId() != null && 
+            task.getAssigneeId().equals(userId)) {
+            task.setFirstResponseAt(OffsetDateTime.now());
+        }
+
         taskRepository.save(task);
         
         // Broadcast task status update via WebSocket

@@ -55,6 +55,10 @@ public class Task {
     @Column(name = "rating_pending")
     private Boolean ratingPending; // Set to true when task is completed
 
+    // Response Time Tracking
+    @Column(name = "first_response_at")
+    private OffsetDateTime firstResponseAt; // First action by assignee
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {
@@ -122,4 +126,7 @@ public class Task {
 
     public Boolean getRatingPending() { return ratingPending; }
     public void setRatingPending(Boolean ratingPending) { this.ratingPending = ratingPending; }
+
+    public OffsetDateTime getFirstResponseAt() { return firstResponseAt; }
+    public void setFirstResponseAt(OffsetDateTime firstResponseAt) { this.firstResponseAt = firstResponseAt; }
 }

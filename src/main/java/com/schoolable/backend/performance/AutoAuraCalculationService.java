@@ -347,6 +347,31 @@ public class AutoAuraCalculationService {
                 // Estimate accuracy from completion without reopening
                 return calculateTaskMetric(employeeId, "task_quality", config, quarterStart, now);
 
+            case "response_time":
+            case "client_responsiveness":
+                // Calculate average response time (hours from creation to first response)
+                List<Task> tasksWithResponse = quarterTasks.stream()
+                    .filter(t -> t.getFirstResponseAt() != null && t.getCreatedAt() != null)
+                    .toList();
+                
+                if (tasksWithResponse.isEmpty()) return 0.0;
+                
+                double avgHours = tasksWithResponse.stream()
+                    .mapToDouble(t -> {
+                        long hours = java.time.temporal.ChronoUnit.HOURS.between(
+                            t.getCreatedAt(), t.getFirstResponseAt());
+                        return Math.max(0, hours);
+                    })
+                    .average()
+                    .orElse(0);
+                
+                // Target is typically 2-4 hours for good response time
+                // Score: 100% if < 2 hours, linearly down to 0% at 24+ hours
+                double targetHours = config.target > 0 ? config.target : 4.0;
+                if (avgHours <= targetHours) return 100.0;
+                if (avgHours >= 24) return 20.0; // Still some score for responding same day
+                return Math.max(20, 100 - ((avgHours - targetHours) / (24 - targetHours)) * 80);
+
             default:
                 // Default to completion rate
                 return calculateTaskMetric(employeeId, "task_completion_rate", config, quarterStart, now);
