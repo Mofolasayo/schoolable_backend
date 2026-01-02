@@ -5,12 +5,12 @@ import com.schoolable.backend.attendance.AttendanceRepository;
 import com.schoolable.backend.compliance.ComplianceSubmissionRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
-import com.schoolable.backend.tasks.Task;
-import com.schoolable.backend.tasks.TaskRepository;
-import com.schoolable.backend.training.TrainingRecordRepository;
+import com.schoolable.backend.task.Task;
+import com.schoolable.backend.task.TaskRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -259,7 +259,7 @@ public class AutoAuraCalculationService {
     private double calculateTaskMetric(UUID employeeId, String metricKey, 
             DepartmentKpiConfig.MetricConfig config, LocalDate quarterStart, LocalDate now) {
         
-        List<Task> allTasks = taskRepository.findByAssigneeId(employeeId);
+        List<Task> allTasks = taskRepository.findByAssigneeIdOrderByCreatedAtDesc(employeeId);
         
         // Filter to quarter
         List<Task> quarterTasks = allTasks.stream()
@@ -356,7 +356,7 @@ public class AutoAuraCalculationService {
     private double calculateAttendanceMetric(UUID employeeId, String metricKey,
             DepartmentKpiConfig.MetricConfig config, LocalDate quarterStart, LocalDate now) {
 
-        List<Attendance> attendances = attendanceRepository.findByUserId(employeeId);
+        List<Attendance> attendances = attendanceRepository.findByUserIdOrderByDateDesc(employeeId);
         
         // Filter to quarter
         List<Attendance> quarterAttendances = attendances.stream()
@@ -384,9 +384,9 @@ public class AutoAuraCalculationService {
             case "punctuality":
                 // Check-ins before 9 AM (or configured start time)
                 long onTime = quarterAttendances.stream()
-                    .filter(a -> a.getCheckInTime() != null)
-                    .filter(a -> a.getCheckInTime().getHour() < 9 ||
-                                (a.getCheckInTime().getHour() == 9 && a.getCheckInTime().getMinute() == 0))
+                    .filter(a -> a.getCheckIn() != null)
+                    .filter(a -> a.getCheckIn().getHour() < 9 ||
+                                (a.getCheckIn().getHour() == 9 && a.getCheckIn().getMinute() == 0))
                     .count();
                 return quarterAttendances.isEmpty() ? 100.0 : 
                     (onTime * 100.0) / quarterAttendances.size();
@@ -397,8 +397,8 @@ public class AutoAuraCalculationService {
                 
                 // Calculate average check-in hour
                 double avgHour = quarterAttendances.stream()
-                    .filter(a -> a.getCheckInTime() != null)
-                    .mapToInt(a -> a.getCheckInTime().getHour() * 60 + a.getCheckInTime().getMinute())
+                    .filter(a -> a.getCheckIn() != null)
+                    .mapToInt(a -> a.getCheckIn().getHour() * 60 + a.getCheckIn().getMinute())
                     .average()
                     .orElse(540); // 9 AM default
                 
@@ -457,9 +457,9 @@ public class AutoAuraCalculationService {
 
         try {
             // Get training records for this quarter
-            long quarterCerts = trainingRepository.countByEmployeeIdAndQuarterAndYear(
+            long quarterCerts = trainingRepository.countApprovedInQuarter(
                 employeeId, currentQuarter, currentYear);
-            long totalCerts = trainingRepository.countByEmployeeId(employeeId);
+            long totalCerts = trainingRepository.countByEmployeeIdAndStatus(employeeId, "approved");
 
             switch (metricKey) {
                 case "certifications":
@@ -516,7 +516,7 @@ public class AutoAuraCalculationService {
 
         // Get the most recent weekly report
         List<WeeklyPerformanceReport> reports = weeklyReportRepository
-            .findByEmployeeIdOrderByCreatedAtDesc(employeeId);
+            .findByEmployeeIdOrderByYearDescWeekNumberDesc(employeeId);
 
         if (reports.isEmpty()) {
             return 60.0; // Default if no TL ratings yet
@@ -610,7 +610,7 @@ public class AutoAuraCalculationService {
     private double calculateImprovementFromWeeklyReports(UUID employeeId) {
         try {
             List<WeeklyPerformanceReport> reports = weeklyReportRepository
-                .findByEmployeeIdOrderByCreatedAtDesc(employeeId);
+                .findByEmployeeIdOrderByYearDescWeekNumberDesc(employeeId);
 
             if (reports.size() < 4) {
                 // Not enough data - return neutral
