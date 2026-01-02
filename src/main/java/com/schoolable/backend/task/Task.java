@@ -25,6 +25,9 @@ public class Task {
     @Column(name = "due_date")
     private OffsetDateTime dueDate;
 
+    @Column(name = "due_time")
+    private java.time.LocalTime dueTime;
+
     @Column(name = "tags", columnDefinition = "TEXT[]")
     private String[] tags;
 
@@ -96,6 +99,9 @@ public class Task {
 
     public OffsetDateTime getDueDate() { return dueDate; }
     public void setDueDate(OffsetDateTime dueDate) { this.dueDate = dueDate; }
+
+    public java.time.LocalTime getDueTime() { return dueTime; }
+    public void setDueTime(java.time.LocalTime dueTime) { this.dueTime = dueTime; }
 
     public String[] getTags() { return tags; }
     public void setTags(String[] tags) { this.tags = tags; }

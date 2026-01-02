@@ -80,6 +80,9 @@ public class AutoAuraCalculationService {
     @Autowired(required = false)
     private SubMetricScoreRepository subMetricScoreRepository;
 
+    @Autowired
+    private PeerHelpfulnessRepository peerHelpfulnessRepository;
+
     // ============================================================
     // SCHEDULED AUTO-CALCULATION
     // Runs every Sunday at 2 AM to calculate weekly scores
@@ -327,8 +330,21 @@ public class AutoAuraCalculationService {
             case "team_support":
             case "collaboration":
             case "team_collaboration":
-                // Track tasks where the assignee was helping someone else
-                // (tasks created by someone other than the assignee)
+                // PRIMARY: Use peer helpfulness ratings (how colleagues rated this person)
+                // Get average rating from peers for this quarter
+                int currentYear = now.getYear();
+                int startWeek = getQuarterStartWeek(quarterStart);
+                int endWeek = now.get(java.time.temporal.WeekFields.ISO.weekOfYear());
+                
+                Double peerAvg = peerHelpfulnessRepository.getAverageRatingForPeriod(
+                    employeeId, currentYear, startWeek, endWeek);
+                
+                if (peerAvg != null) {
+                    // Convert 1-5 rating to 0-100 scale
+                    return (peerAvg / 5.0) * 100;
+                }
+                
+                // FALLBACK: If no peer ratings, check task-based support (tasks done for others)
                 long supportTasks = quarterTasks.stream()
                     .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()))
                     .filter(t -> t.getCreatedBy() != null && !t.getCreatedBy().equals(employeeId))
@@ -752,5 +768,9 @@ public class AutoAuraCalculationService {
             case "growth": return "Growth & Learning";
             default: return key.substring(0, 1).toUpperCase() + key.substring(1).replace("_", " ");
         }
+    }
+
+    private int getQuarterStartWeek(LocalDate quarterStart) {
+        return quarterStart.get(java.time.temporal.WeekFields.ISO.weekOfYear());
     }
 }
