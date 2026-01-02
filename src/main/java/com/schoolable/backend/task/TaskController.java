@@ -241,6 +241,7 @@ public class TaskController {
         }
 
         Task task = taskOpt.get();
+        String oldStatus = task.getStatus();
         task.setStatus(req.status());
         if (req.progress() != null) {
             task.setProgress(req.progress());
@@ -250,6 +251,16 @@ public class TaskController {
                 task.setProgress(100);
             } else if ("Pending".equals(req.status())) {
                 task.setProgress(0);
+            }
+        }
+        
+        // Set rating_pending when task is marked as completed
+        // This triggers the rating popup for the task creator
+        if ("Completed".equals(req.status()) && !"Completed".equals(oldStatus)) {
+            if (task.getCreatedBy() != null && task.getAssigneeId() != null 
+                && !task.getCreatedBy().equals(task.getAssigneeId())) {
+                // Only prompt for rating if creator is different from assignee
+                task.setRatingPending(true);
             }
         }
 
@@ -421,7 +432,115 @@ public class TaskController {
         ));
     }
 
+    // ==================== TASK QUALITY RATING ====================
+
+    public record TaskRatingRequest(
+        Integer rating,  // 1-5 stars
+        String comment   // Optional feedback
+    ) {}
+
+    @Operation(summary = "Get tasks pending quality rating")
+    @GetMapping("/rating/pending")
+    public ResponseEntity<?> getTasksPendingRating(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        UUID userId = (UUID) auth.getPrincipal();
+        List<Task> pendingTasks = taskRepository.findByCreatedByAndRatingPendingTrue(userId);
+
+        List<Map<String, Object>> result = pendingTasks.stream()
+                .map(task -> {
+                    Map<String, Object> taskInfo = new HashMap<>();
+                    taskInfo.put("id", task.getId());
+                    taskInfo.put("title", task.getTitle());
+                    taskInfo.put("assigneeId", task.getAssigneeId());
+                    taskInfo.put("completedAt", task.getUpdatedAt());
+                    
+                    // Get assignee name
+                    if (task.getAssigneeId() != null) {
+                        profileRepository.findById(task.getAssigneeId()).ifPresent(profile -> 
+                            taskInfo.put("assigneeName", profile.getFirstName() + " " + profile.getLastName())
+                        );
+                    }
+                    return taskInfo;
+                })
+                .toList();
+
+        return ResponseEntity.ok(Map.of(
+            "pendingRatings", result,
+            "count", result.size()
+        ));
+    }
+
+    @Operation(summary = "Rate a completed task")
+    @PostMapping("/{taskId}/rate")
+    @Transactional
+    public ResponseEntity<?> rateTask(
+            Authentication auth,
+            @PathVariable Long taskId,
+            @RequestBody TaskRatingRequest request) {
+
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        UUID userId = (UUID) auth.getPrincipal();
+
+        var taskOpt = taskRepository.findById(taskId);
+        if (taskOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
+        }
+
+        Task task = taskOpt.get();
+
+        // Only the creator can rate the task
+        if (!userId.equals(task.getCreatedBy())) {
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Only the task creator can rate this task"
+            ));
+        }
+
+        // Validate rating
+        if (request.rating() == null || request.rating() < 1 || request.rating() > 5) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Rating must be between 1 and 5"
+            ));
+        }
+
+        // Save rating
+        task.setQualityRating(request.rating());
+        task.setRatedBy(userId);
+        task.setRatedAt(OffsetDateTime.now());
+        task.setRatingComment(request.comment());
+        task.setRatingPending(false);
+        taskRepository.save(task);
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Task rated successfully",
+            "taskId", taskId,
+            "rating", request.rating()
+        ));
+    }
+
+    @Operation(summary = "Get average quality rating for an employee")
+    @GetMapping("/rating/average/{employeeId}")
+    public ResponseEntity<?> getAverageRating(
+            Authentication auth,
+            @PathVariable UUID employeeId) {
+
+        Double avgRating = taskRepository.getAverageQualityRating(employeeId);
+
+        return ResponseEntity.ok(Map.of(
+            "employeeId", employeeId,
+            "averageRating", avgRating != null ? Math.round(avgRating * 10) / 10.0 : null,
+            "hasRatings", avgRating != null
+        ));
+    }
+
     // ==================== HELPER METHODS ====================
+
 
     private void recalculateTaskProgress(Long taskId) {
         List<TaskSubtask> subtasks = subtaskRepository.findByTaskIdOrderByIdAsc(taskId);
@@ -457,6 +576,13 @@ public class TaskController {
         response.put("progress", task.getProgress());
         response.put("created_by", task.getCreatedBy());
         response.put("created_at", task.getCreatedAt());
+        
+        // Quality Rating fields
+        response.put("quality_rating", task.getQualityRating());
+        response.put("rated_by", task.getRatedBy());
+        response.put("rated_at", task.getRatedAt());
+        response.put("rating_comment", task.getRatingComment());
+        response.put("rating_pending", task.getRatingPending());
 
         // Get assignee profile
         if (task.getAssigneeId() != null) {

@@ -39,6 +39,22 @@ public class Task {
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
 
+    // Quality Rating System - Creator rates assignee after completion
+    @Column(name = "quality_rating")
+    private Integer qualityRating; // 1-5 stars
+
+    @Column(name = "rated_by")
+    private UUID ratedBy;
+
+    @Column(name = "rated_at")
+    private OffsetDateTime ratedAt;
+
+    @Column(name = "rating_comment")
+    private String ratingComment;
+
+    @Column(name = "rating_pending")
+    private Boolean ratingPending; // Set to true when task is completed
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {
@@ -91,5 +107,19 @@ public class Task {
 
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
-}
 
+    public Integer getQualityRating() { return qualityRating; }
+    public void setQualityRating(Integer qualityRating) { this.qualityRating = qualityRating; }
+
+    public UUID getRatedBy() { return ratedBy; }
+    public void setRatedBy(UUID ratedBy) { this.ratedBy = ratedBy; }
+
+    public OffsetDateTime getRatedAt() { return ratedAt; }
+    public void setRatedAt(OffsetDateTime ratedAt) { this.ratedAt = ratedAt; }
+
+    public String getRatingComment() { return ratingComment; }
+    public void setRatingComment(String ratingComment) { this.ratingComment = ratingComment; }
+
+    public Boolean getRatingPending() { return ratingPending; }
+    public void setRatingPending(Boolean ratingPending) { this.ratingPending = ratingPending; }
+}

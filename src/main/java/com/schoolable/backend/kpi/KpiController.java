@@ -31,6 +31,10 @@ public class KpiController {
     @Autowired
     private TeamQuarterlyScoreRepository scoreRepository;
 
+    @Autowired
+    private PersonalInsightsService personalInsightsService;
+
+
     // ==================== KPI MANAGEMENT ====================
 
     /**
@@ -398,7 +402,48 @@ public class KpiController {
         ));
     }
 
+    // ==================== PERSONAL INSIGHTS ====================
+
+    /**
+     * GET /api/kpi/insights/personal
+     * Get personalized AI insights for current user
+     */
+    @GetMapping("/insights/personal")
+    public ResponseEntity<?> getPersonalInsights(Authentication auth) {
+        try {
+            UUID userId = getUserId(auth);
+            Map<String, Object> insights = personalInsightsService.generatePersonalInsights(userId);
+            return ResponseEntity.ok(insights);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * GET /api/kpi/insights/employee/{employeeId}
+     * Get personalized AI insights for a specific employee (Team Lead only)
+     */
+    @GetMapping("/insights/employee/{employeeId}")
+    public ResponseEntity<?> getEmployeeInsights(
+            Authentication auth,
+            @PathVariable UUID employeeId) {
+        try {
+            // TODO: Add authorization check - only TL can view their team's insights
+            Map<String, Object> insights = personalInsightsService.generatePersonalInsights(employeeId);
+            return ResponseEntity.ok(insights);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", e.getMessage()
+            ));
+        }
+    }
+
     // ==================== HELPER METHODS ====================
+
 
     private UUID getUserId(Authentication auth) {
         if (auth == null || auth.getPrincipal() == null) {

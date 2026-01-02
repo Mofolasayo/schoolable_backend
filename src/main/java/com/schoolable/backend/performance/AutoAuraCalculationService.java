@@ -293,16 +293,15 @@ public class AutoAuraCalculationService {
                                 "Done".equalsIgnoreCase(t.getStatus()))
                     .filter(t -> t.getDueDate() != null)
                     .count();
-                return totalCompleted > 0 ? (onTime * 100.0) / totalCompleted : 100.0;
+                return totalCompleted > 0 ? (onTime * 100.0) / totalCompleted : 0.0;  // 0 for new users
 
             case "task_quality":
-                // Future: track tasks that were reopened
-                // For now, estimate based on completion rate
-                long completedQuality = quarterTasks.stream()
-                    .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()))
-                    .count();
-                return quarterTasks.size() > 0 ? 
-                    Math.min(100, (completedQuality * 100.0) / quarterTasks.size() + 10) : 80.0;
+                // Use actual quality ratings from task creators
+                Double avgRating = taskRepository.getAverageQualityRatingAfter(
+                    employeeId, quarterStart.atStartOfDay().atOffset(java.time.ZoneOffset.UTC));
+                // Convert 1-5 rating to 0-100 scale
+                // If no ratings yet, return 0 (new user)
+                return avgRating != null ? (avgRating / 5.0) * 100 : 0.0;
 
             case "documentation":
                 // Tasks with notes or descriptions
@@ -328,9 +327,14 @@ public class AutoAuraCalculationService {
             case "team_support":
             case "collaboration":
             case "team_collaboration":
-                // Cross-team tasks (tasks not assigned by direct TL - simplified)
-                // For now, just return 80% if they have tasks
-                return quarterTasks.size() > 0 ? 80.0 : 0.0;
+                // Track tasks where the assignee was helping someone else
+                // (tasks created by someone other than the assignee)
+                long supportTasks = quarterTasks.stream()
+                    .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()))
+                    .filter(t -> t.getCreatedBy() != null && !t.getCreatedBy().equals(employeeId))
+                    .count();
+                // Score based on helping others - 5 help tasks = 100%
+                return supportTasks > 0 ? Math.min(100, (supportTasks / 5.0) * 100) : 0.0;
 
             case "employee_support":
                 // HR-specific: count of HR-related tasks handled
@@ -519,7 +523,7 @@ public class AutoAuraCalculationService {
             .findByEmployeeIdOrderByYearDescWeekNumberDesc(employeeId);
 
         if (reports.isEmpty()) {
-            return 60.0; // Default if no TL ratings yet
+            return 0.0; // Default 0 for new users - no TL ratings yet
         }
 
         // Get the most recent report
@@ -529,33 +533,33 @@ public class AutoAuraCalculationService {
             case "initiative":
             case "self_initiative":
                 Integer initiative = latest.getInitiativeScore();
-                return initiative != null ? (initiative / 5.0) * 100 : 60.0;
+                return initiative != null ? (initiative / 5.0) * 100 : 0.0;
 
             case "attitude":
             case "attitude_towards_work":
                 Integer attitude = latest.getAttitudeTowardsWorkScore();
-                return attitude != null ? (attitude / 5.0) * 100 : 60.0;
+                return attitude != null ? (attitude / 5.0) * 100 : 0.0;
 
             case "professionalism":
             case "communication":
                 Integer teamwork = latest.getTeamworkCollaborationScore();
-                return teamwork != null ? (teamwork / 5.0) * 100 : 60.0;
+                return teamwork != null ? (teamwork / 5.0) * 100 : 0.0;
 
             case "adaptability":
                 Integer adaptability = latest.getAdaptabilityScore();
-                return adaptability != null ? (adaptability / 5.0) * 100 : 60.0;
+                return adaptability != null ? (adaptability / 5.0) * 100 : 0.0;
 
             case "integrity":
             case "confidentiality":
                 Integer integrity = latest.getIntegrityScore();
-                return integrity != null ? (integrity / 5.0) * 100 : 60.0;
+                return integrity != null ? (integrity / 5.0) * 100 : 0.0;
 
             case "quality":
             case "attention_to_detail":
             case "accuracy":
                 // Use technical score as proxy
                 Integer technical = latest.getTechnicalScore();
-                return technical != null ? (technical / 5.0) * 100 : 60.0;
+                return technical != null ? (technical / 5.0) * 100 : 0.0;
 
             case "reliability":
             case "learning":
@@ -569,7 +573,7 @@ public class AutoAuraCalculationService {
                 Integer behavioral = latest.getBehavioralScore();
                 if (growth != null) return (growth / 5.0) * 100;
                 if (behavioral != null) return (behavioral / 5.0) * 100;
-                return 60.0;
+                return 0.0;
 
             default:
                 // Average of available scores
@@ -579,9 +583,10 @@ public class AutoAuraCalculationService {
                 if (latest.getBehavioralScore() != null) { sum += latest.getBehavioralScore(); count++; }
                 if (latest.getCultureFitScore() != null) { sum += latest.getCultureFitScore(); count++; }
                 if (latest.getGrowthLearningScore() != null) { sum += latest.getGrowthLearningScore(); count++; }
-                return count > 0 ? ((sum / count) / 5.0) * 100 : 60.0;
+                return count > 0 ? ((sum / count) / 5.0) * 100 : 0.0;
         }
     }
+
 
     // ============================================================
     // HISTORICAL/DERIVED METRICS (Requires stored historical data)
@@ -599,7 +604,7 @@ public class AutoAuraCalculationService {
                 return calculateImprovementFromWeeklyReports(employeeId);
 
             default:
-                return 50.0; // Neutral if we don't have data
+                return 0.0; // 0 for new users without data
         }
     }
 
@@ -613,8 +618,8 @@ public class AutoAuraCalculationService {
                 .findByEmployeeIdOrderByYearDescWeekNumberDesc(employeeId);
 
             if (reports.size() < 4) {
-                // Not enough data - return neutral
-                return 50.0;
+                // Not enough data - 0 for new users
+                return 0.0;
             }
 
             // Calculate average of recent reports (last 4)
