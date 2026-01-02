@@ -155,6 +155,7 @@ public class TaskController {
         task.setPriority(req.priority() != null ? req.priority() : "Medium");
         task.setStatus("Pending");
         task.setDueDate(req.dueDate() != null ? OffsetDateTime.parse(req.dueDate()) : null);
+        task.setDueTime(req.dueTime() != null ? java.time.LocalTime.parse(req.dueTime()) : null);
         task.setTags(req.tags() != null ? req.tags().toArray(new String[0]) : new String[0]);
         task.setProgress(0);
         task.setCreatedBy(userId);
@@ -580,6 +581,7 @@ public class TaskController {
         response.put("priority", task.getPriority());
         response.put("status", task.getStatus());
         response.put("due_date", task.getDueDate());
+        response.put("due_time", task.getDueTime() != null ? task.getDueTime().toString() : null);
         response.put("tags", task.getTags() != null ? Arrays.asList(task.getTags()) : List.of());
         response.put("progress", task.getProgress());
         response.put("created_by", task.getCreatedBy());
@@ -670,6 +672,7 @@ public class TaskController {
             String organization,
             String priority,
             String dueDate,
+            String dueTime, // HH:mm format
             List<String> tags,
             List<SubtaskRequest> subtasks,
             List<AttachmentRequest> attachments
@@ -687,6 +690,7 @@ public class TaskController {
             String priority,
             String status,
             String dueDate,
+            String dueTime, // HH:mm format
             List<String> tags,
             Integer progress
     ) {}
