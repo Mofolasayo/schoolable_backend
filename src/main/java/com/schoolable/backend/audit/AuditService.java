@@ -120,6 +120,74 @@ public class AuditService {
     }
 
     /**
+     * Convenience method to log a CREATE action with a specific actor.
+     */
+    public void logCreate(String entityType, String entityId, UUID actorId) {
+        try {
+            AuditLog log = new AuditLog();
+            log.setEntityType(entityType);
+            log.setEntityId(entityId);
+            log.setAction(ACTION_CREATE);
+            log.setActorId(actorId);
+            
+            Optional<Profile> profile = profileRepository.findById(actorId);
+            profile.ifPresent(p -> {
+                log.setActorName(p.getFullName());
+                log.setActorEmail(p.getEmail());
+            });
+
+            captureRequestMetadata(log);
+            auditLogRepository.save(log);
+        } catch (Exception e) {
+            System.err.println("Failed to create audit log: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Convenience method to log an UPDATE action with changes and a specific actor.
+     */
+    public void logUpdate(String entityType, String entityId, Map<String, ?> changes, UUID actorId) {
+        try {
+            AuditLog log = new AuditLog();
+            log.setEntityType(entityType);
+            log.setEntityId(entityId);
+            log.setAction(ACTION_UPDATE);
+            log.setActorId(actorId);
+            
+            Optional<Profile> profile = profileRepository.findById(actorId);
+            profile.ifPresent(p -> {
+                log.setActorName(p.getFullName());
+                log.setActorEmail(p.getEmail());
+            });
+
+            if (changes != null && !changes.isEmpty()) {
+                log.setChanges(objectMapper.writeValueAsString(changes));
+            }
+
+            captureRequestMetadata(log);
+            auditLogRepository.save(log);
+        } catch (Exception e) {
+            System.err.println("Failed to create audit log: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Helper to capture request metadata.
+     */
+    private void captureRequestMetadata(AuditLog log) {
+        try {
+            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs != null) {
+                HttpServletRequest request = attrs.getRequest();
+                log.setIpAddress(getClientIp(request));
+                log.setUserAgent(request.getHeader("User-Agent"));
+            }
+        } catch (Exception e) {
+            // Request context not available (e.g., async processing)
+        }
+    }
+
+    /**
      * Log an action for a specific actor (used when actor is known but not in security context).
      */
     public void logForActor(String entityType, String entityId, String action, UUID actorId, String actorName) {
