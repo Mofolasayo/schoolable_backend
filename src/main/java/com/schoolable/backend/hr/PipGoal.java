@@ -18,8 +18,8 @@ public class PipGoal {
     public static final String STATUS_NOT_MET = "not_met";
     
     @Id
-    @GeneratedValue
-    private UUID id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "pip_id", nullable = false)
@@ -76,8 +76,8 @@ public class PipGoal {
     }
     
     // Getters and Setters
-    public UUID getId() { return id; }
-    public void setId(UUID id) { this.id = id; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
     
     public PipRecord getPipRecord() { return pipRecord; }
     public void setPipRecord(PipRecord pipRecord) { this.pipRecord = pipRecord; }

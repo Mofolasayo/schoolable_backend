@@ -366,7 +366,7 @@ public class HRManagementService {
      * Add a goal to a PIP.
      */
     @Transactional
-    public PipGoal addPipGoal(UUID pipId, String goalDescription, String targetMetric,
+    public PipGoal addPipGoal(Long pipId, String goalDescription, String targetMetric,
                               BigDecimal targetValue, LocalDate dueDate) {
         PipRecord pip = pipRepository.findById(pipId)
             .orElseThrow(() -> new IllegalArgumentException("PIP not found"));
@@ -388,7 +388,7 @@ public class HRManagementService {
      * Complete a PIP with outcome.
      */
     @Transactional
-    public PipRecord completePip(UUID pipId, BigDecimal finalScore, String notes, 
+    public PipRecord completePip(Long pipId, BigDecimal finalScore, String notes, 
                                  String outcome, UUID completedBy) {
         PipRecord pip = pipRepository.findById(pipId)
             .orElseThrow(() -> new IllegalArgumentException("PIP not found"));

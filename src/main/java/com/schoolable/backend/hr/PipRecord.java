@@ -27,11 +27,17 @@ public class PipRecord {
     public static final String OUTCOME_DEMOTION = "demotion";
     
     @Id
-    @GeneratedValue
-    private UUID id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
     
     @Column(name = "employee_id", nullable = false)
     private UUID employeeId;
+
+    // ...
+
+    // Getters and Setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
     
     @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
@@ -148,8 +154,8 @@ public class PipRecord {
     }
     
     // Getters and Setters
-    public UUID getId() { return id; }
-    public void setId(UUID id) { this.id = id; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
     
     public UUID getEmployeeId() { return employeeId; }
     public void setEmployeeId(UUID employeeId) { this.employeeId = employeeId; }

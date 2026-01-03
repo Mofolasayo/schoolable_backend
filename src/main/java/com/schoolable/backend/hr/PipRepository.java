@@ -9,7 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface PipRepository extends JpaRepository<PipRecord, UUID> {
+public interface PipRepository extends JpaRepository<PipRecord, Long> {
     
     Optional<PipRecord> findByEmployeeIdAndStatus(UUID employeeId, String status);
     

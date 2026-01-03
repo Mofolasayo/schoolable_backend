@@ -277,7 +277,7 @@ public class HRManagementController {
     @PostMapping("/pip/{id}/complete")
     public ResponseEntity<?> completePip(
             Authentication auth,
-            @PathVariable UUID id,
+            @PathVariable Long id,
             @RequestBody Map<String, Object> request
     ) {
         UUID userId = UUID.fromString((String) auth.getPrincipal());
