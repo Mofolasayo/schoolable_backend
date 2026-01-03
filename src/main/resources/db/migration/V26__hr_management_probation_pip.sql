@@ -261,6 +261,10 @@ ADD COLUMN IF NOT EXISTS years_of_experience INTEGER DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_probation_employee ON probation_records(employee_id);
 CREATE INDEX IF NOT EXISTS idx_probation_status ON probation_records(status);
 CREATE INDEX IF NOT EXISTS idx_pip_employee ON pip_records(employee_id);
+
+-- Add status column to pip_records if it doesn't exist (V7 only created outcome column)
+ALTER TABLE pip_records ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active';
+
 CREATE INDEX IF NOT EXISTS idx_pip_status ON pip_records(status);
 CREATE INDEX IF NOT EXISTS idx_team_lead_employee ON team_lead_appointments(employee_id);
 CREATE INDEX IF NOT EXISTS idx_promotion_employee ON promotion_recommendations(employee_id);
