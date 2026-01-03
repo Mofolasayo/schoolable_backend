@@ -143,8 +143,8 @@ CREATE TABLE IF NOT EXISTS pip_records (
 
 -- PIP goals tracking
 CREATE TABLE IF NOT EXISTS pip_goals (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    pip_id UUID NOT NULL REFERENCES pip_records(id) ON DELETE CASCADE,
+    id BIGSERIAL PRIMARY KEY,
+    pip_id BIGINT NOT NULL REFERENCES pip_records(id) ON DELETE CASCADE,
     goal_description TEXT NOT NULL,
     target_metric TEXT,
     target_value DECIMAL(10,2),
