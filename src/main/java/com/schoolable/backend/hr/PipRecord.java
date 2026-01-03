@@ -33,11 +33,7 @@ public class PipRecord {
     @Column(name = "employee_id", nullable = false)
     private UUID employeeId;
 
-    // ...
 
-    // Getters and Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
     
     @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
