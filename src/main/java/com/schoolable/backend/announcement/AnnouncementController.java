@@ -119,7 +119,7 @@ public class AnnouncementController {
         return ResponseEntity.ok(buildAnnouncementResponse(announcementOpt.get(), isRead));
     }
 
-    @Operation(summary = "Create a new announcement (admin only)")
+    @Operation(summary = "Create a new announcement (admin or team lead)")
     @PostMapping
     public ResponseEntity<?> createAnnouncement(@RequestBody CreateAnnouncementRequest req, Authentication auth) {
         if (auth == null || auth.getPrincipal() == null) {
@@ -127,17 +127,34 @@ public class AnnouncementController {
         }
         UUID userId = (UUID) auth.getPrincipal();
 
-        // Check if user is admin
+        // Check if user is admin or team lead
         var profileOpt = profileRepository.findById(userId);
-        if (profileOpt.isEmpty() || !"admin".equalsIgnoreCase(profileOpt.get().getRole())) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only admins can create announcements"));
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Profile not found"));
+        }
+        
+        var profile = profileOpt.get();
+        boolean isAdmin = "admin".equalsIgnoreCase(profile.getRole());
+        boolean isTeamLead = profile.getIsTeamLead() != null && profile.getIsTeamLead();
+        
+        if (!isAdmin && !isTeamLead) {
+            return ResponseEntity.status(403).body(Map.of("error", "Only admins and team leads can create announcements"));
+        }
+        
+        // If team lead (not admin), force audience to their department
+        String audience = req.audience();
+        if (!isAdmin && isTeamLead) {
+            // Team leads can only create announcements for their department
+            audience = profile.getDepartment() != null ? profile.getDepartment() : "All Staff";
+        } else if (audience == null) {
+            audience = "All Staff";
         }
 
         Announcement announcement = new Announcement();
         announcement.setId(UUID.randomUUID());
         announcement.setTitle(req.title());
         announcement.setContent(req.content());
-        announcement.setAudience(req.audience() != null ? req.audience() : "All Staff");
+        announcement.setAudience(audience);
         announcement.setPinned(req.pinned() != null ? req.pinned() : false);
         announcement.setStatus(req.status() != null ? req.status() : "Published");
         announcement.setScheduledAt(req.scheduledAt() != null ? OffsetDateTime.parse(req.scheduledAt()) : null);

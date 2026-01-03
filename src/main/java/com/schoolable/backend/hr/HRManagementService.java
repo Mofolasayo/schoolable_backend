@@ -1,0 +1,568 @@
+package com.schoolable.backend.hr;
+
+import com.schoolable.backend.audit.AuditService;
+import com.schoolable.backend.profile.Profile;
+import com.schoolable.backend.profile.ProfileRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * Service for HR Management operations.
+ * Implements Allpro Technologies Performance & Employment Level Cadre Policy.
+ */
+@Service
+public class HRManagementService {
+
+    @Autowired
+    private ProfileRepository profileRepository;
+
+    @Autowired
+    private JobLevelRepository jobLevelRepository;
+
+    @Autowired
+    private ProbationRepository probationRepository;
+
+    @Autowired
+    private PipRepository pipRepository;
+
+    @Autowired
+    private TeamLeadRepository teamLeadRepository;
+
+    @Autowired
+    private AuditService auditService;
+
+    // =====================================================
+    // ORGANIZATIONAL STRUCTURE
+    // =====================================================
+
+    /**
+     * Get organizational structure by grade with employee counts.
+     */
+    public List<Map<String, Object>> getOrganizationalStructure() {
+        List<Map<String, Object>> structure = new ArrayList<>();
+        
+        // Define grades based on policy pyramid
+        Map<Integer, String[]> gradeDefinitions = new LinkedHashMap<>();
+        gradeDefinitions.put(6, new String[]{"Directors", "General Manager"});
+        gradeDefinitions.put(5, new String[]{"C-Suite Executives", "Deputy GM, Asst GM"});
+        gradeDefinitions.put(4, new String[]{"Senior Executives, Senior Managers, Managers", "Principal Manager, Senior Manager, Manager, Asst Manager"});
+        gradeDefinitions.put(3, new String[]{"Junior Executives, Asst. Team Leads, Team Leads", "Senior Associate, Associate, Senior Analyst, Analyst, Senior Officer"});
+        gradeDefinitions.put(2, new String[]{"NYSC, Internship, Mgt Trainees", "Officer, Executive Trainee"});
+        gradeDefinitions.put(1, new String[]{"Auxiliary & Contract Staff", "Contract Staff, SIWES, IT"});
+
+        for (Map.Entry<Integer, String[]> entry : gradeDefinitions.entrySet()) {
+            int grade = entry.getKey();
+            String[] info = entry.getValue();
+            
+            List<Profile> employeesInGrade = profileRepository.findByGradeOrderByFullNameAsc(grade);
+            
+            List<Map<String, Object>> employees = employeesInGrade.stream()
+                .map(this::toEmployeeDto)
+                .collect(Collectors.toList());
+            
+            Map<String, Object> gradeData = new LinkedHashMap<>();
+            gradeData.put("grade", grade);
+            gradeData.put("title", info[0]);
+            gradeData.put("roles", info[1]);
+            gradeData.put("count", employees.size());
+            gradeData.put("employees", employees);
+            
+            structure.add(gradeData);
+        }
+        
+        return structure;
+    }
+
+    /**
+     * Get employees by job level.
+     */
+    public List<Map<String, Object>> getEmployeesByLevel(Integer level) {
+        List<Profile> employees = profileRepository.findByJobLevelOrderByFullNameAsc(level);
+        return employees.stream().map(this::toEmployeeDto).collect(Collectors.toList());
+    }
+
+    /**
+     * Get all job levels.
+     */
+    public List<JobLevel> getAllJobLevels() {
+        return jobLevelRepository.findAllByOrderByLevelNumberAsc();
+    }
+
+    // =====================================================
+    // TEAM LEADS
+    // =====================================================
+
+    /**
+     * Get all active team leads with details.
+     */
+    public List<Map<String, Object>> getActiveTeamLeads() {
+        // Get from team_lead_appointments table
+        List<TeamLeadAppointment> appointments = teamLeadRepository.findActiveTeamLeads();
+        
+        List<Map<String, Object>> result = new ArrayList<>();
+        
+        for (TeamLeadAppointment appointment : appointments) {
+            Profile employee = profileRepository.findById(appointment.getEmployeeId()).orElse(null);
+            if (employee == null) continue;
+            
+            Map<String, Object> lead = new LinkedHashMap<>();
+            lead.put("id", employee.getId());
+            lead.put("name", employee.getFullName());
+            lead.put("email", employee.getEmail());
+            lead.put("role", employee.getJobTitle());
+            lead.put("department", employee.getDepartment());
+            lead.put("appointmentId", appointment.getId());
+            lead.put("status", appointment.getStatus());
+            lead.put("appointedAt", appointment.getAppointedAt());
+            lead.put("confirmedAt", appointment.getConfirmedAt());
+            lead.put("teamName", appointment.getTeamName());
+            lead.put("teamSize", appointment.getTeamSize());
+            lead.put("reviewCycles", appointment.getReviewCyclesCompleted());
+            lead.put("cgpaAtAppointment", appointment.getCgpaAtAppointment());
+            lead.put("currentCgpa", appointment.getCurrentCgpa());
+            lead.put("perks", appointment.getPerks());
+            lead.put("monthsAsLead", appointment.getMonthsAsTeamLead());
+            
+            result.add(lead);
+        }
+        
+        // Also include profiles marked as team_lead but without appointments
+        List<Profile> teamLeadProfiles = profileRepository.findByIsTeamLeadTrue();
+        Set<UUID> appointedIds = appointments.stream()
+            .map(TeamLeadAppointment::getEmployeeId)
+            .collect(Collectors.toSet());
+        
+        for (Profile profile : teamLeadProfiles) {
+            if (!appointedIds.contains(profile.getId())) {
+                Map<String, Object> lead = toEmployeeDto(profile);
+                lead.put("status", "legacy");
+                lead.put("teamSize", 0);
+                lead.put("reviewCycles", 0);
+                result.add(lead);
+            }
+        }
+        
+        return result;
+    }
+
+    /**
+     * Appoint a new team lead.
+     */
+    @Transactional
+    public TeamLeadAppointment appointTeamLead(UUID employeeId, String teamName, UUID appointedBy) {
+        Profile employee = profileRepository.findById(employeeId)
+            .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
+        
+        // Check if already a team lead
+        Optional<TeamLeadAppointment> existing = teamLeadRepository
+            .findByEmployeeIdAndStatus(employeeId, TeamLeadAppointment.STATUS_ACTING);
+        if (existing.isPresent()) {
+            throw new IllegalArgumentException("Employee is already an acting team lead");
+        }
+        
+        existing = teamLeadRepository.findByEmployeeIdAndStatus(employeeId, TeamLeadAppointment.STATUS_CONFIRMED);
+        if (existing.isPresent()) {
+            throw new IllegalArgumentException("Employee is already a confirmed team lead");
+        }
+        
+        TeamLeadAppointment appointment = new TeamLeadAppointment();
+        appointment.setEmployeeId(employeeId);
+        appointment.setAppointedAt(OffsetDateTime.now());
+        appointment.setStatus(TeamLeadAppointment.STATUS_ACTING);
+        appointment.setDepartment(employee.getDepartment());
+        appointment.setTeamName(teamName);
+        appointment.setTeamSize(0);
+        appointment.setPerks("[\"workspace\", \"data_allowance\"]"); // Default perks
+        
+        appointment = teamLeadRepository.save(appointment);
+        
+        // Update profile
+        employee.setIsTeamLead(true);
+        profileRepository.save(employee);
+        
+        // Audit log
+        auditService.logCreate("TEAM_LEAD_APPOINTMENT", appointment.getId().toString(), appointedBy);
+        
+        return appointment;
+    }
+
+    // =====================================================
+    // PROBATION
+    // =====================================================
+
+    /**
+     * Get all probation records with employee details.
+     */
+    public List<Map<String, Object>> getAllProbations() {
+        List<ProbationRecord> records = probationRepository.findActiveProbations();
+        return records.stream().map(this::toProbationDto).collect(Collectors.toList());
+    }
+
+    /**
+     * Get probation statistics.
+     */
+    public Map<String, Object> getProbationStats() {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("onProbation", probationRepository.countActiveProbations());
+        stats.put("dueForConfirmation", probationRepository.findDueForConfirmation(
+            LocalDate.now(), LocalDate.now().plusWeeks(2)).size());
+        stats.put("atRisk", probationRepository.countAtRisk());
+        stats.put("overdue", probationRepository.findOverdue(LocalDate.now()).size());
+        return stats;
+    }
+
+    /**
+     * Create probation record for new hire.
+     */
+    @Transactional
+    public ProbationRecord createProbation(UUID employeeId, LocalDate startDate, 
+                                           int probationMonths, UUID supervisorId, UUID createdBy) {
+        // Check if already has probation
+        if (probationRepository.findByEmployeeId(employeeId).isPresent()) {
+            throw new IllegalArgumentException("Employee already has a probation record");
+        }
+        
+        ProbationRecord record = new ProbationRecord();
+        record.setEmployeeId(employeeId);
+        record.setStartDate(startDate);
+        record.setOriginalEndDate(startDate.plusMonths(probationMonths));
+        record.setCurrentEndDate(startDate.plusMonths(probationMonths));
+        record.setSupervisorId(supervisorId);
+        record.setCreatedBy(createdBy);
+        
+        record = probationRepository.save(record);
+        
+        // Update profile
+        Profile employee = profileRepository.findById(employeeId).orElse(null);
+        if (employee != null) {
+            employee.setProbationStatus("pending");
+            employee.setHireDate(startDate);
+            profileRepository.save(employee);
+        }
+        
+        auditService.logCreate("PROBATION", record.getId().toString(), createdBy);
+        
+        return record;
+    }
+
+    /**
+     * Submit probation appraisal.
+     */
+    @Transactional
+    public ProbationRecord submitAppraisal(UUID probationId, BigDecimal score, 
+                                           String recommendation, String notes, UUID submittedBy) {
+        ProbationRecord record = probationRepository.findById(probationId)
+            .orElseThrow(() -> new IllegalArgumentException("Probation record not found"));
+        
+        record.setAppraisalCompletedDate(LocalDate.now());
+        record.setAppraisalScore(score);
+        record.setRecommendation(recommendation);
+        record.setRecommendationNotes(notes);
+        
+        // Determine status based on score and policy
+        if (score.compareTo(BigDecimal.valueOf(66)) >= 0) {
+            // Score >= 66% - recommend confirmation
+            record.setSupervisorApprovedAt(OffsetDateTime.now());
+        } else if (score.compareTo(BigDecimal.valueOf(50)) >= 0) {
+            // Score 50-65% - extend probation
+            int newExtension = record.getExtensionCount() + 1;
+            if (newExtension <= 3) {
+                record.setExtensionCount(newExtension);
+                record.setStatus("extension_" + newExtension);
+                record.setCurrentEndDate(record.getCurrentEndDate().plusMonths(1));
+            } else {
+                record.setRecommendation(ProbationRecord.RECOMMENDATION_TERMINATE);
+            }
+        } else {
+            // Score < 50% - terminate
+            record.setRecommendation(ProbationRecord.RECOMMENDATION_TERMINATE);
+        }
+        
+        record = probationRepository.save(record);
+        
+        auditService.logUpdate("PROBATION", record.getId().toString(), 
+            Map.of("appraisalScore", score, "recommendation", recommendation), submittedBy);
+        
+        return record;
+    }
+
+    /**
+     * Confirm employee after probation.
+     */
+    @Transactional
+    public ProbationRecord confirmEmployee(UUID probationId, UUID confirmedBy) {
+        ProbationRecord record = probationRepository.findById(probationId)
+            .orElseThrow(() -> new IllegalArgumentException("Probation record not found"));
+        
+        record.setStatus(ProbationRecord.STATUS_CONFIRMED);
+        record.setConfirmedAt(OffsetDateTime.now());
+        record.setCeoApprovedAt(OffsetDateTime.now());
+        
+        record = probationRepository.save(record);
+        
+        // Update profile
+        Profile employee = profileRepository.findById(record.getEmployeeId()).orElse(null);
+        if (employee != null) {
+            employee.setProbationStatus("confirmed");
+            profileRepository.save(employee);
+        }
+        
+        auditService.logUpdate("PROBATION", record.getId().toString(), 
+            Map.of("status", "confirmed"), confirmedBy);
+        
+        return record;
+    }
+
+    // =====================================================
+    // PERFORMANCE IMPROVEMENT PLANS (PIP)
+    // =====================================================
+
+    /**
+     * Get all active PIPs.
+     */
+    public List<Map<String, Object>> getActivePips() {
+        List<PipRecord> records = pipRepository.findActivePips();
+        return records.stream().map(this::toPipDto).collect(Collectors.toList());
+    }
+
+    /**
+     * Create a new PIP.
+     */
+    @Transactional
+    public PipRecord createPip(UUID employeeId, String reason, BigDecimal triggerScore,
+                               String quarter, Integer year, UUID supervisorId, UUID createdBy) {
+        // Check if already has active PIP
+        Optional<PipRecord> existing = pipRepository.findByEmployeeIdAndStatus(employeeId, PipRecord.STATUS_ACTIVE);
+        if (existing.isPresent()) {
+            throw new IllegalArgumentException("Employee already has an active PIP");
+        }
+        
+        PipRecord pip = new PipRecord();
+        pip.setEmployeeId(employeeId);
+        pip.setStartDate(LocalDate.now());
+        pip.setEndDate(LocalDate.now().plusMonths(3)); // Max 3 months per policy
+        pip.setTriggerReason(reason);
+        pip.setTriggerScore(triggerScore);
+        pip.setTriggerQuarter(quarter);
+        pip.setTriggerYear(year);
+        pip.setSupervisorId(supervisorId);
+        pip.setCreatedBy(createdBy);
+        
+        pip = pipRepository.save(pip);
+        
+        auditService.logCreate("PIP", pip.getId().toString(), createdBy);
+        
+        return pip;
+    }
+
+    /**
+     * Add a goal to a PIP.
+     */
+    @Transactional
+    public PipGoal addPipGoal(UUID pipId, String goalDescription, String targetMetric,
+                              BigDecimal targetValue, LocalDate dueDate) {
+        PipRecord pip = pipRepository.findById(pipId)
+            .orElseThrow(() -> new IllegalArgumentException("PIP not found"));
+        
+        PipGoal goal = new PipGoal();
+        goal.setPipRecord(pip);
+        goal.setGoalDescription(goalDescription);
+        goal.setTargetMetric(targetMetric);
+        goal.setTargetValue(targetValue);
+        goal.setDueDate(dueDate);
+        
+        pip.getGoals().add(goal);
+        pipRepository.save(pip);
+        
+        return goal;
+    }
+
+    /**
+     * Complete a PIP with outcome.
+     */
+    @Transactional
+    public PipRecord completePip(UUID pipId, BigDecimal finalScore, String notes, 
+                                 String outcome, UUID completedBy) {
+        PipRecord pip = pipRepository.findById(pipId)
+            .orElseThrow(() -> new IllegalArgumentException("PIP not found"));
+        
+        pip.setCompletedAt(OffsetDateTime.now());
+        pip.setFinalAssessmentScore(finalScore);
+        pip.setFinalAssessmentNotes(notes);
+        pip.setOutcome(outcome);
+        
+        if (finalScore.compareTo(BigDecimal.valueOf(50)) >= 0) {
+            pip.setStatus(PipRecord.STATUS_COMPLETED_SUCCESS);
+        } else {
+            pip.setStatus(PipRecord.STATUS_COMPLETED_FAIL);
+        }
+        
+        pip = pipRepository.save(pip);
+        
+        auditService.logUpdate("PIP", pip.getId().toString(),
+            Map.of("outcome", outcome, "finalScore", finalScore), completedBy);
+        
+        return pip;
+    }
+
+    // =====================================================
+    // PROMOTIONS
+    // =====================================================
+
+    /**
+     * Get employees eligible for promotion based on Aura scores (CGPA equivalent).
+     */
+    public List<Map<String, Object>> getPromotionEligibility() {
+        List<Profile> employees = profileRepository.findByStatusAndProbationStatus("active", "confirmed");
+        List<Map<String, Object>> eligible = new ArrayList<>();
+        
+        for (Profile employee : employees) {
+            // Calculate CGPA from Aura score (convert from 0-5 scale to CGPA 0-5 scale)
+            Double auraScore = getEmployeeAuraScore(employee.getId());
+            if (auraScore == null) continue;
+            
+            BigDecimal cgpa = BigDecimal.valueOf(auraScore);
+            
+            String eligibilityType = null;
+            String eligibilityStatus = null;
+            
+            // Check against policy thresholds
+            if (cgpa.compareTo(BigDecimal.valueOf(4.60)) >= 0) {
+                eligibilityType = "Fast-Track";
+                eligibilityStatus = "Immediate Review";
+            } else if (cgpa.compareTo(BigDecimal.valueOf(4.20)) >= 0) {
+                eligibilityType = "Vertical";
+                eligibilityStatus = "Eligible";
+            } else if (cgpa.compareTo(BigDecimal.valueOf(3.50)) >= 0) {
+                eligibilityType = "Horizontal";
+                eligibilityStatus = "Eligible";
+            }
+            
+            if (eligibilityType != null) {
+                Map<String, Object> emp = toEmployeeDto(employee);
+                emp.put("cgpa", cgpa);
+                emp.put("promotionType", eligibilityType);
+                emp.put("status", eligibilityStatus);
+                
+                // Calculate target role
+                Integer currentLevel = employee.getJobLevel();
+                if (currentLevel == null) currentLevel = 1;
+                
+                JobLevel currentJobLevel = jobLevelRepository.findByLevelNumber(currentLevel).orElse(null);
+                JobLevel targetJobLevel = jobLevelRepository.findByLevelNumber(
+                    eligibilityType.equals("Vertical") ? currentLevel + 1 : currentLevel
+                ).orElse(null);
+                
+                emp.put("currentLevel", currentLevel);
+                emp.put("currentTitle", currentJobLevel != null ? currentJobLevel.getTitle() : employee.getJobTitle());
+                emp.put("targetLevel", eligibilityType.equals("Vertical") ? currentLevel + 1 : currentLevel);
+                emp.put("targetTitle", targetJobLevel != null ? targetJobLevel.getTitle() : "TBD");
+                
+                eligible.add(emp);
+            }
+        }
+        
+        // Sort by CGPA descending
+        eligible.sort((a, b) -> ((BigDecimal)b.get("cgpa")).compareTo((BigDecimal)a.get("cgpa")));
+        
+        return eligible;
+    }
+
+    // =====================================================
+    // CERTIFICATES / TRAINING
+    // =====================================================
+
+    /**
+     * Get all training records with employee info.
+     */
+    public List<Map<String, Object>> getAllTrainingRecords() {
+        // This would use TrainingRecordRepository
+        // For now, return empty - integrate with existing training service
+        return new ArrayList<>();
+    }
+
+    // =====================================================
+    // HELPER METHODS
+    // =====================================================
+
+    private Map<String, Object> toEmployeeDto(Profile profile) {
+        Map<String, Object> dto = new LinkedHashMap<>();
+        dto.put("id", profile.getId());
+        dto.put("name", profile.getFullName());
+        dto.put("email", profile.getEmail());
+        dto.put("role", profile.getJobTitle());
+        dto.put("department", profile.getDepartment());
+        dto.put("jobLevel", profile.getJobLevel());
+        dto.put("grade", profile.getGrade());
+        dto.put("isTeamLead", profile.getIsTeamLead());
+        dto.put("hireDate", profile.getHireDate());
+        dto.put("yearsOfExperience", profile.getYearsOfExperience());
+        dto.put("avatar", "https://api.dicebear.com/7.x/avataaars/svg?seed=" + profile.getId());
+        return dto;
+    }
+
+    private Map<String, Object> toProbationDto(ProbationRecord record) {
+        Profile employee = profileRepository.findById(record.getEmployeeId()).orElse(null);
+        
+        Map<String, Object> dto = new LinkedHashMap<>();
+        dto.put("id", record.getId());
+        dto.put("employeeId", record.getEmployeeId());
+        dto.put("employeeName", employee != null ? employee.getFullName() : "Unknown");
+        dto.put("employeeRole", employee != null ? employee.getJobTitle() : null);
+        dto.put("employeeEmail", employee != null ? employee.getEmail() : null);
+        dto.put("startDate", record.getStartDate());
+        dto.put("endDate", record.getCurrentEndDate());
+        dto.put("appraisalDate", record.getAppraisalScheduledDate());
+        dto.put("score", record.getAppraisalScore());
+        dto.put("status", record.getStatus());
+        dto.put("extensionCount", record.getExtensionCount());
+        dto.put("recommendation", record.getRecommendation());
+        dto.put("policyRecommendation", record.getPolicyRecommendation());
+        dto.put("performanceBand", record.getPerformanceBand());
+        dto.put("daysRemaining", record.getDaysRemaining());
+        dto.put("isOverdue", record.isOverdue());
+        dto.put("isInGracePeriod", record.isInGracePeriod());
+        
+        return dto;
+    }
+
+    private Map<String, Object> toPipDto(PipRecord record) {
+        Profile employee = profileRepository.findById(record.getEmployeeId()).orElse(null);
+        
+        Map<String, Object> dto = new LinkedHashMap<>();
+        dto.put("id", record.getId());
+        dto.put("employeeId", record.getEmployeeId());
+        dto.put("employeeName", employee != null ? employee.getFullName() : "Unknown");
+        dto.put("employeeRole", employee != null ? employee.getJobTitle() : null);
+        dto.put("startDate", record.getStartDate());
+        dto.put("endDate", record.getEndDate());
+        dto.put("status", record.getStatus());
+        dto.put("triggerReason", record.getTriggerReason());
+        dto.put("triggerScore", record.getTriggerScore());
+        dto.put("daysRemaining", record.getDaysRemaining());
+        dto.put("weeksRemaining", record.getWeeksRemaining());
+        dto.put("progressPercentage", record.getProgressPercentage());
+        dto.put("isOverdue", record.isOverdue());
+        dto.put("goals", record.getGoals().stream().map(g -> Map.of(
+            "id", g.getId(),
+            "description", g.getGoalDescription(),
+            "status", g.getStatus(),
+            "progress", g.getProgressPercentage()
+        )).collect(Collectors.toList()));
+        
+        return dto;
+    }
+
+    private Double getEmployeeAuraScore(UUID employeeId) {
+        // This would integrate with the Aura calculation service
+        // For now, return a placeholder
+        return null;
+    }
+}

@@ -238,11 +238,19 @@ public class TeamLeadController {
                 memberInfo.put("employee_id", member.getEmployeeId());
                 memberInfo.put("is_team_lead", Boolean.TRUE.equals(member.getIsTeamLead()));
                 
-                // Generate avatar URL
+                // Generate avatar URL matching mobile app logic (gender-based)
                 String avatarUrl = member.getAvatarUrl();
                 if (avatarUrl == null || avatarUrl.isEmpty()) {
-                    String seed = member.getEmployeeId() != null ? member.getEmployeeId() : member.getEmail();
-                    avatarUrl = "https://api.dicebear.com/7.x/avataaars/svg?seed=" + seed;
+                    String seed = member.getEmployeeId() != null ? member.getEmployeeId() : 
+                                  member.getEmail() != null ? member.getEmail() : "User";
+                    String gender = member.getGender();
+                    String style = "bottts"; // Default for unspecified
+                    if ("male".equalsIgnoreCase(gender)) {
+                        style = "adventurer";
+                    } else if ("female".equalsIgnoreCase(gender)) {
+                        style = "adventurer-neutral";
+                    }
+                    avatarUrl = "https://api.dicebear.com/7.x/" + style + "/svg?seed=" + seed;
                 }
                 memberInfo.put("avatar_url", avatarUrl);
                 
@@ -252,7 +260,18 @@ public class TeamLeadController {
                     if (auraData != null) {
                         memberInfo.put("aura_score", auraData.getAuraScore());
                         memberInfo.put("aura_grade", auraData.getGrade());
-                        memberInfo.put("pillars", auraData.getPillars());
+                        // Return simplified pillars structure for frontend compatibility
+                        if (auraData.getPillars() != null) {
+                            Map<String, Number> simplePillars = new LinkedHashMap<>();
+                            var pillars = auraData.getPillars();
+                            simplePillars.put("technical", pillars.getTechnical() != null ? pillars.getTechnical().getScore() : 0);
+                            simplePillars.put("behavioral", pillars.getBehavioral() != null ? pillars.getBehavioral().getScore() : 0);
+                            simplePillars.put("culture", pillars.getCultureFit() != null ? pillars.getCultureFit().getScore() : 0);
+                            simplePillars.put("growth", pillars.getGrowthLearning() != null ? pillars.getGrowthLearning().getScore() : 0);
+                            memberInfo.put("pillars", simplePillars);
+                        } else {
+                            memberInfo.put("pillars", null);
+                        }
                     } else {
                         memberInfo.put("aura_score", null);
                         memberInfo.put("aura_grade", "N/A");

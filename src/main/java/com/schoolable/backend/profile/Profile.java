@@ -323,4 +323,64 @@ public class Profile {
     public void setPfpEligible(Boolean pfpEligible) {
         this.pfpEligible = pfpEligible;
     }
+
+    // HR Management fields for organizational structure
+    @Column(name = "job_level")
+    private Integer jobLevel = 1;
+
+    @Column(name = "grade")
+    private Integer grade = 2;
+
+    @Column(name = "hire_date")
+    private java.sql.Date hireDate;
+
+    @Column(name = "probation_status")
+    private String probationStatus = "not_applicable";
+
+    @Column(name = "years_of_experience")
+    private Integer yearsOfExperience = 0;
+
+    public Integer getJobLevel() {
+        return jobLevel;
+    }
+
+    public void setJobLevel(Integer jobLevel) {
+        this.jobLevel = jobLevel;
+    }
+
+    public Integer getGrade() {
+        return grade;
+    }
+
+    public void setGrade(Integer grade) {
+        this.grade = grade;
+    }
+
+    public java.sql.Date getHireDate() {
+        return hireDate;
+    }
+
+    public void setHireDate(java.sql.Date hireDate) {
+        this.hireDate = hireDate;
+    }
+
+    public void setHireDate(java.time.LocalDate hireDate) {
+        this.hireDate = hireDate != null ? java.sql.Date.valueOf(hireDate) : null;
+    }
+
+    public String getProbationStatus() {
+        return probationStatus;
+    }
+
+    public void setProbationStatus(String probationStatus) {
+        this.probationStatus = probationStatus;
+    }
+
+    public Integer getYearsOfExperience() {
+        return yearsOfExperience;
+    }
+
+    public void setYearsOfExperience(Integer yearsOfExperience) {
+        this.yearsOfExperience = yearsOfExperience;
+    }
 }
