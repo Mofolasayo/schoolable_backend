@@ -345,7 +345,7 @@ public class HRManagementController {
      */
     @GetMapping("/certificates")
     public ResponseEntity<?> getAllCertificates() {
-        List<TrainingRecord> records = trainingRecordRepository.findAllByOrderByCompletedAtDesc();
+        List<TrainingRecord> records = trainingRecordRepository.findAllByOrderByCreatedAtDesc();
         
         List<Map<String, Object>> result = records.stream().map(record -> {
             Profile employee = profileRepository.findById(record.getEmployeeId()).orElse(null);
@@ -396,7 +396,7 @@ public class HRManagementController {
     @PatchMapping("/certificates/{id}/review")
     public ResponseEntity<?> reviewCertificate(
             Authentication auth,
-            @PathVariable UUID id,
+            @PathVariable Long id,
             @RequestBody Map<String, String> request
     ) {
         UUID userId = UUID.fromString((String) auth.getPrincipal());

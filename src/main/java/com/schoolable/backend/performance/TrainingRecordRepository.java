@@ -13,7 +13,7 @@ import java.util.UUID;
  * Repository for training records/certificates.
  * Used for Growth & Learning pillar calculation.
  */
-public interface TrainingRecordRepository extends JpaRepository<TrainingRecord, UUID> {
+public interface TrainingRecordRepository extends JpaRepository<TrainingRecord, Long> {
 
     // Find all trainings for an employee
     List<TrainingRecord> findByEmployeeIdOrderByCreatedAtDesc(UUID employeeId);
@@ -61,7 +61,7 @@ public interface TrainingRecordRepository extends JpaRepository<TrainingRecord, 
         UUID employeeId, String quarter, Integer year, String status);
 
     // HR Management queries - for admin certificate review
-    List<TrainingRecord> findAllByOrderByCompletedAtDesc();
+    List<TrainingRecord> findAllByOrderByCreatedAtDesc();
     
     long countByStatus(String status);
     

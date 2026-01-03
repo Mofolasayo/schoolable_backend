@@ -69,6 +69,16 @@ public class TrainingRecord {
     @Column(name = "rejection_reason")
     private String rejectionReason;
 
+    // Review fields (for admin approval)
+    @Column(name = "reviewed_by")
+    private UUID reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private OffsetDateTime reviewedAt;
+
+    @Column(name = "review_notes")
+    private String reviewNotes;
+
     @Column(name = "created_at")
     private OffsetDateTime createdAt;
 
@@ -151,7 +161,22 @@ public class TrainingRecord {
     public String getRejectionReason() { return rejectionReason; }
     public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
 
+    public UUID getReviewedBy() { return reviewedBy; }
+    public void setReviewedBy(UUID reviewedBy) { this.reviewedBy = reviewedBy; }
+
+    public OffsetDateTime getReviewedAt() { return reviewedAt; }
+    public void setReviewedAt(OffsetDateTime reviewedAt) { this.reviewedAt = reviewedAt; }
+
+    public String getReviewNotes() { return reviewNotes; }
+    public void setReviewNotes(String reviewNotes) { this.reviewNotes = reviewNotes; }
+
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
+
+    // Alias methods for compatibility
+    public String getCertificateName() { return trainingName; }
+    public OffsetDateTime getCompletedAt() { return approvedAt; }
+    public LocalDate getExpiresAt() { return expiryDate; }
+    public String getFileUrl() { return certificateUrl; }
 }
 
