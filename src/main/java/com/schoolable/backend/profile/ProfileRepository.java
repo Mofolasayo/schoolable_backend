@@ -35,5 +35,14 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     
     @Query("SELECT COUNT(p) FROM Profile p WHERE p.jobLevel = :level")
     long countByJobLevel(Integer level);
+
+    // Team Lead queries
+    @Query("SELECT COUNT(p) FROM Profile p WHERE p.teamLeadId = :teamLeadId")
+    long countByTeamLeadId(UUID teamLeadId);
+    
+    List<Profile> findByTeamLeadId(UUID teamLeadId);
+    
+    // Active employees for Aura calculation
+    List<Profile> findByStatusAndProfileCompletedAtIsNotNull(String status);
 }
 

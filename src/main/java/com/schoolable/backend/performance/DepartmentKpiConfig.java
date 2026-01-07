@@ -3,17 +3,17 @@ package com.schoolable.backend.performance;
 import java.util.*;
 
 /**
- * Unified KPI configuration for Aura Score calculation.
+ * AURA SCORE SYSTEM V2 - Unified KPI Configuration
  * 
- * STANDARDIZED PILLAR WEIGHTS (same for all departments):
- * - Technical Competence: 40% (KPI/Daily Report AI Score is primary)
+ * PILLAR WEIGHTS (same for all departments):
+ * - Technical Competence: 35%
  * - Behavioral Competency: 25%
- * - Culture Fit: 25%
- * - Growth & Learning: 10%
+ * - Culture Fit: 20%
+ * - Growth & Learning: 20%
  * 
- * Technical Competence is driven primarily by:
- * - Daily Report AI Score (50% of pillar) - AI grades reports against defined KPIs
- * - Task metrics (50% of pillar) - Task completion, on-time delivery, quality
+ * Automation Level: ~80%
+ * TL Rating Influence: ~19%
+ * Peer Rating Influence: ~1%
  */
 public class DepartmentKpiConfig {
 
@@ -21,84 +21,96 @@ public class DepartmentKpiConfig {
     // UNIFIED PROFILE - Same weights for all departments
     // ============================================================
 
-    /**
-     * UNIFIED AURA PROFILE
-     * All departments use the same pillar weights:
-     * - Technical Competence: 40%
-     * - Behavioral Competency: 25%
-     * - Culture Fit: 25%
-     * - Growth & Learning: 10%
-     */
     public static final DepartmentProfile UNIFIED_PROFILE = new DepartmentProfile(
         "Standard",
         Map.of(
             // ================================================
-            // TECHNICAL COMPETENCE (40% of Aura)
-            // Primary driver: Daily Report AI Score (50%)
-            // Secondary: Task metrics (50%)
+            // TECHNICAL COMPETENCE (35% of Aura)
+            // Primary: Daily Reports + Tasks + Individual KPIs
             // ================================================
-            "technical", new PillarProfile(40, Map.of(
-                // PRIMARY: Daily Report AI Score - AI grades reports against KPIs
-                "daily_report_score", new MetricConfig(50, "Daily Report & KPI Performance", "auto", "daily_reports",
-                    "AI-graded daily report score based on tasks completed, productivity, and KPI alignment", 100.0),
+            "technical", new PillarProfile(35, Map.of(
+                // AI-graded daily report score
+                "daily_report_score", new MetricConfig(35, "Daily Report Quality", "auto", "daily_reports",
+                    "AI-graded score based on clarity, productivity, and KPI alignment", 100.0),
                 
-                // SECONDARY: Task-based metrics
-                "task_completion_rate", new MetricConfig(20, "Task Completion Rate", "auto", "tasks",
-                    "Percentage of assigned tasks completed", 100.0),
-                "on_time_delivery", new MetricConfig(15, "On-Time Delivery", "auto", "tasks",
-                    "Tasks completed before or on due date", 95.0),
-                "task_quality", new MetricConfig(15, "Task Quality", "auto", "tasks",
-                    "Quality rating from task creators (no reopens)", 90.0)
+                // Combined task metrics
+                "task_performance", new MetricConfig(30, "Task Performance", "auto", "tasks",
+                    "Combined: completion rate + on-time delivery + quality rating", 100.0),
+                
+                // Individual KPI achievement (from IndividualKpi entity)
+                "kpi_achievement", new MetricConfig(20, "Individual KPI Achievement", "auto", "individual_kpis",
+                    "Weighted average of individual KPI achievement percentages", 100.0),
+                
+                // TL Technical Rating
+                "tl_technical_rating", new MetricConfig(15, "Technical Rating", "team_lead", "weekly_report",
+                    "Team Lead's weekly technical score (1-5 scale)", 5.0)
             )),
 
             // ================================================
             // BEHAVIORAL COMPETENCY (25% of Aura)
-            // Attendance with lateness penalties, consistency, professionalism
+            // Primary: Attendance/Punctuality + Consistency
             // ================================================
             "behavioral", new PillarProfile(25, Map.of(
+                // Merged attendance and punctuality with lateness penalties
                 "attendance_punctuality", new MetricConfig(55, "Attendance & Punctuality", "auto", "attendance",
-                    "Presence with lateness penalties: On-time=100%, 1-15min late=95%, 16-30min=85%, 31-60min=70%", 95.0),
+                    "Merged: On-time=100%, 1-15min late=95%, 16-30min=85%, 31-60min=70%", 95.0),
+                
+                // Work consistency (standard deviation of check-in times)
                 "consistency", new MetricConfig(20, "Work Consistency", "auto", "attendance",
-                    "Consistent check-in pattern and work schedule", 90.0),
-                "initiative", new MetricConfig(25, "Initiative & Professionalism", "team_lead", "weekly_report",
-                    "Proactive behavior and professional conduct (Team Lead rated)", 4.0)
+                    "Consistency of check-in times (low variance = high score)", 90.0),
+                
+                // TL Initiative Rating
+                "initiative", new MetricConfig(15, "Initiative & Adaptability", "team_lead", "weekly_report",
+                    "Average of TL initiative and adaptability scores", 5.0),
+                
+                // Peer Helpfulness Rating
+                "peer_helpfulness", new MetricConfig(10, "Peer Helpfulness", "peer", "peer_feedback",
+                    "Average peer helpfulness rating (requires 3+ ratings)", 5.0)
             )),
 
             // ================================================
-            // CULTURE FIT (25% of Aura)
-            // Compliance, collaboration, attitude
+            // CULTURE FIT (20% of Aura)
+            // Primary: Compliance + TL/Peer Ratings
             // ================================================
-            "culture_fit", new PillarProfile(25, Map.of(
-                "policy_compliance", new MetricConfig(30, "Policy Compliance", "auto", "compliance",
-                    "SOP/Policy acknowledgments and adherence", 100.0),
-                "training_compliance", new MetricConfig(25, "Training Compliance", "auto", "training",
-                    "Required trainings completed", 100.0),
-                "team_collaboration", new MetricConfig(25, "Team Collaboration", "auto", "tasks",
-                    "Cross-team support and collaboration", 100.0),
-                "attitude", new MetricConfig(20, "Attitude & Values", "team_lead", "weekly_report",
-                    "Positive attitude and alignment with company values (Team Lead rated)", 4.0)
+            "culture_fit", new PillarProfile(20, Map.of(
+                // Policy compliance
+                "policy_compliance", new MetricConfig(40, "Policy Compliance", "auto", "compliance",
+                    "Policies acknowledged and adhered to", 100.0),
+                
+                // TL Culture Rating
+                "tl_culture_rating", new MetricConfig(30, "Culture Rating", "team_lead", "weekly_report",
+                    "Team Lead's culture fit score (1-5 scale)", 5.0),
+                
+                // Peer Values Rating
+                "peer_values", new MetricConfig(30, "Values Alignment", "peer", "peer_feedback",
+                    "Peer ratings for values, accountability, feedback openness", 5.0)
             )),
 
             // ================================================
-            // GROWTH & LEARNING (10% of Aura)
-            // Training, certifications, improvement
+            // GROWTH & LEARNING (20% of Aura)
+            // Primary: Training + Improvement Trend
             // ================================================
-            "growth", new PillarProfile(10, Map.of(
-                "training_hours", new MetricConfig(35, "Training Participation", "auto", "training",
-                    "Quarterly training hours completed", 8.0),
-                "certifications", new MetricConfig(35, "Certifications Earned", "auto", "training",
+            "growth", new PillarProfile(20, Map.of(
+                // Training participation (estimated hours)
+                "training_participation", new MetricConfig(30, "Training Participation", "auto", "training",
+                    "Estimated training hours from certificates (4 hrs each)", 8.0),
+                
+                // Certifications earned
+                "certifications", new MetricConfig(25, "Certifications Earned", "auto", "training",
                     "New certificates uploaded this quarter", 1.0),
-                "improvement_trend", new MetricConfig(30, "Performance Improvement", "auto", "aura",
-                    "Score improvement vs last quarter", 5.0)
+                
+                // Improvement trend
+                "improvement_trend", new MetricConfig(25, "Performance Improvement", "auto", "aura_history",
+                    "Score improvement vs previous quarter", 5.0),
+                
+                // TL Growth Rating
+                "tl_growth_rating", new MetricConfig(20, "Growth Rating", "team_lead", "weekly_report",
+                    "Team Lead's growth/learning score (1-5 scale)", 5.0)
             ))
         )
     );
 
-    // ============================================================
-    // DEPARTMENT PROFILES (all use UNIFIED weights now)
-    // Department-specific customization is minimal
-    // ============================================================
-
+    // All departments use unified profile
     public static final Map<String, DepartmentProfile> DEPARTMENT_PROFILES = Map.of(
         "engineering", UNIFIED_PROFILE,
         "operations", UNIFIED_PROFILE,
@@ -111,7 +123,6 @@ public class DepartmentKpiConfig {
         "support", UNIFIED_PROFILE
     );
 
-    // Default profile for departments not explicitly configured
     public static final DepartmentProfile DEFAULT_PROFILE = UNIFIED_PROFILE;
 
     // ============================================================
@@ -151,7 +162,7 @@ public class DepartmentKpiConfig {
     }
 
     public static class PillarProfile {
-        public final int weight; // Weight of this pillar in overall score
+        public final int weight;
         public final Map<String, MetricConfig> metrics;
 
         public PillarProfile(int weight, Map<String, MetricConfig> metrics) {
@@ -161,12 +172,12 @@ public class DepartmentKpiConfig {
     }
 
     public static class MetricConfig {
-        public final int weightInPillar; // Weight within the pillar (should sum to 100)
+        public final int weightInPillar;
         public final String displayName;
-        public final String source; // "auto" or "team_lead"
-        public final String dataSource; // tasks, attendance, compliance, training, weekly_report, daily_reports, etc.
+        public final String source; // "auto", "team_lead", "peer", "admin"
+        public final String dataSource;
         public final String description;
-        public final double target; // What value = 100% score
+        public final double target;
 
         public MetricConfig(int weight, String displayName, String source, String dataSource, 
                            String description, double target) {
@@ -188,8 +199,6 @@ public class DepartmentKpiConfig {
         
         String normalizedDept = department.toLowerCase().trim();
         
-        // All departments now use the same unified profile
-        // This mapping is kept for future department-specific customization if needed
         if (normalizedDept.contains("engineer") || normalizedDept.contains("develop") || 
             normalizedDept.contains("tech") || normalizedDept.contains("software")) {
             return DEPARTMENT_PROFILES.getOrDefault("engineering", DEFAULT_PROFILE);
@@ -209,15 +218,6 @@ public class DepartmentKpiConfig {
         if (normalizedDept.contains("market") || normalizedDept.contains("brand") || normalizedDept.contains("content")) {
             return DEPARTMENT_PROFILES.getOrDefault("marketing", DEFAULT_PROFILE);
         }
-        if (normalizedDept.contains("product")) {
-            return DEPARTMENT_PROFILES.getOrDefault("product", DEFAULT_PROFILE);
-        }
-        if (normalizedDept.contains("design") || normalizedDept.contains("creative")) {
-            return DEPARTMENT_PROFILES.getOrDefault("design", DEFAULT_PROFILE);
-        }
-        if (normalizedDept.contains("support") || normalizedDept.contains("customer")) {
-            return DEPARTMENT_PROFILES.getOrDefault("support", DEFAULT_PROFILE);
-        }
         
         return DEFAULT_PROFILE;
     }
@@ -226,15 +226,12 @@ public class DepartmentKpiConfig {
         return new ArrayList<>(DEPARTMENT_PROFILES.keySet());
     }
 
-    /**
-     * Get pillar weights - useful for UI display
-     */
     public static Map<String, Integer> getPillarWeights() {
         return Map.of(
-            "technical", 40,
+            "technical", 35,
             "behavioral", 25,
-            "culture_fit", 25,
-            "growth", 10
+            "culture_fit", 20,
+            "growth", 20
         );
     }
 }
