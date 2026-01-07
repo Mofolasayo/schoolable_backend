@@ -2,6 +2,8 @@ package com.schoolable.backend.teamlead;
 
 import com.schoolable.backend.performance.AuraDashboardDto.EmployeeAuraResponse;
 import com.schoolable.backend.performance.AuraDashboardService;
+import com.schoolable.backend.performance.PeerHelpfulnessRating;
+import com.schoolable.backend.performance.PeerHelpfulnessRepository;
 import com.schoolable.backend.performance.WeeklyReportRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
@@ -35,6 +37,7 @@ public class TeamLeadController {
     private final TaskRepository taskRepository;
     private final WeeklyReportRepository weeklyReportRepository;
     private final AuraDashboardService auraDashboardService;
+    private final PeerHelpfulnessRepository peerHelpfulnessRepository;
 
     private final com.schoolable.backend.kpi.TeamAiInsightsService teamAiInsightsService;
 
@@ -43,11 +46,13 @@ public class TeamLeadController {
             TaskRepository taskRepository,
             WeeklyReportRepository weeklyReportRepository,
             AuraDashboardService auraDashboardService,
+            PeerHelpfulnessRepository peerHelpfulnessRepository,
             com.schoolable.backend.kpi.TeamAiInsightsService teamAiInsightsService) {
         this.profileRepository = profileRepository;
         this.taskRepository = taskRepository;
         this.weeklyReportRepository = weeklyReportRepository;
         this.auraDashboardService = auraDashboardService;
+        this.peerHelpfulnessRepository = peerHelpfulnessRepository;
         this.teamAiInsightsService = teamAiInsightsService;
     }
 
@@ -445,6 +450,116 @@ public class TeamLeadController {
             
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Failed to fetch status: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Get peer feedback status for the team.
+     * 
+     * Returns:
+     * - List of team members with their peer feedback submission status
+     * - Aggregated anonymous scores from peers
+     */
+    @Operation(summary = "Get team peer feedback status")
+    @GetMapping("/peer-feedback-status")
+    public ResponseEntity<?> getPeerFeedbackStatus(
+            Authentication auth,
+            @RequestParam(required = false) Integer week,
+            @RequestParam(required = false) Integer year) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        
+        try {
+            UUID teamLeadId = (UUID) auth.getPrincipal();
+            
+            // Get team lead profile
+            var profileOpt = profileRepository.findById(teamLeadId);
+            if (profileOpt.isEmpty()) {
+                return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+            }
+            Profile teamLead = profileOpt.get();
+            
+            // Determine week/year
+            LocalDate now = LocalDate.now();
+            int targetWeek = week != null ? week : now.get(WeekFields.ISO.weekOfWeekBasedYear());
+            int targetYear = year != null ? year : now.getYear();
+            
+            // Get team members
+            List<Profile> teamMembers = profileRepository.findByTeamLeadId(teamLeadId);
+            if (teamMembers.isEmpty()) {
+                return ResponseEntity.ok(Map.of(
+                    "team_size", 0,
+                    "submitted_count", 0,
+                    "pending_count", 0,
+                    "completion_rate", 0,
+                    "week", targetWeek,
+                    "year", targetYear,
+                    "members", List.of()
+                ));
+            }
+            
+            List<Map<String, Object>> memberStatuses = new ArrayList<>();
+            int submittedCount = 0;
+            
+            for (Profile member : teamMembers) {
+                // Check if this member has submitted peer ratings for this week
+                long ratingsGiven = peerHelpfulnessRepository.countByRaterIdAndWeekNumberAndYear(
+                        member.getId(), targetWeek, targetYear);
+                boolean hasSubmitted = ratingsGiven > 0;
+                
+                // Get ratings received for this week (to show aggregated scores)
+                List<PeerHelpfulnessRating> ratingsReceived = peerHelpfulnessRepository
+                        .findByRatedUserIdAndWeekNumberAndYear(member.getId(), targetWeek, targetYear);
+                
+                // Calculate average score received
+                Double avgScoreReceived = ratingsReceived.isEmpty() ? null : 
+                        ratingsReceived.stream()
+                                .mapToDouble(PeerHelpfulnessRating::getRating)
+                                .average()
+                                .orElse(0.0);
+                
+                Map<String, Object> status = new LinkedHashMap<>();
+                status.put("id", member.getId());
+                status.put("full_name", member.getFullName());
+                status.put("job_title", member.getJobTitle());
+                status.put("department", member.getDepartment());
+                status.put("avatar_url", member.getAvatarUrl());
+                status.put("has_submitted_feedback", hasSubmitted);
+                status.put("feedback_received_count", ratingsReceived.size());
+                
+                if (avgScoreReceived != null) {
+                    // Create aggregated scores object (anonymous)
+                    Map<String, Object> aggregatedScores = new LinkedHashMap<>();
+                    aggregatedScores.put("overall", Math.round(avgScoreReceived * 10.0) / 10.0);
+                    aggregatedScores.put("support", Math.round(avgScoreReceived * 10.0) / 10.0); // Same for now
+                    aggregatedScores.put("collaboration", Math.round(avgScoreReceived * 10.0) / 10.0);
+                    aggregatedScores.put("adaptability", Math.round(avgScoreReceived * 10.0) / 10.0);
+                    aggregatedScores.put("values", Math.round(avgScoreReceived * 10.0) / 10.0);
+                    aggregatedScores.put("accountability", Math.round(avgScoreReceived * 10.0) / 10.0);
+                    aggregatedScores.put("feedback_openness", Math.round(avgScoreReceived * 10.0) / 10.0);
+                    status.put("aggregated_scores", aggregatedScores);
+                }
+                
+                memberStatuses.add(status);
+                if (hasSubmitted) submittedCount++;
+            }
+            
+            int teamSize = teamMembers.size();
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("team_lead_id", teamLeadId);
+            response.put("week", targetWeek);
+            response.put("year", targetYear);
+            response.put("team_size", teamSize);
+            response.put("submitted_count", submittedCount);
+            response.put("pending_count", teamSize - submittedCount);
+            response.put("completion_rate", teamSize > 0 ? Math.round((submittedCount * 100.0) / teamSize) : 0);
+            response.put("members", memberStatuses);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to fetch peer feedback status: " + e.getMessage()));
         }
     }
 }
