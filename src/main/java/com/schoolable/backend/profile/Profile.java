@@ -27,6 +27,9 @@ public class Profile {
     private String department;
     private String status;
 
+    @Column(name = "team_lead_id")
+    private UUID teamLeadId;
+
     private String gender;
 
     @Column(name = "password_hash")
@@ -127,6 +130,14 @@ public class Profile {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public UUID getTeamLeadId() {
+        return teamLeadId;
+    }
+
+    public void setTeamLeadId(UUID teamLeadId) {
+        this.teamLeadId = teamLeadId;
     }
 
     public String getGender() {
