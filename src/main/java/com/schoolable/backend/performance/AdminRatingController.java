@@ -175,19 +175,19 @@ public class AdminRatingController {
 
         List<Map<String, Object>> ratingData = new ArrayList<>();
         for (AdminTeamLeadRating r : ratings) {
-            ratingData.add(Map.of(
-                "weekNumber", r.getWeekNumber(),
-                "weekStart", r.getWeekStartDate().toString(),
-                "weekEnd", r.getWeekEndDate().toString(),
-                "leadershipScore", r.getLeadershipScore() != null ? r.getLeadershipScore() : 0,
-                "teamManagementScore", r.getTeamManagementScore() != null ? r.getTeamManagementScore() : 0,
-                "communicationScore", r.getCommunicationScore() != null ? r.getCommunicationScore() : 0,
-                "resultsDeliveryScore", r.getResultsDeliveryScore() != null ? r.getResultsDeliveryScore() : 0,
-                "cultureChampionScore", r.getCultureChampionScore() != null ? r.getCultureChampionScore() : 0,
-                "averageScore", r.getAverageScore(),
-                "areasOfStrength", r.getAreasOfStrength(),
-                "areasForImprovement", r.getAreasForImprovement()
-            ));
+            Map<String, Object> rating = new HashMap<>();
+            rating.put("weekNumber", r.getWeekNumber());
+            rating.put("weekStart", r.getWeekStartDate().toString());
+            rating.put("weekEnd", r.getWeekEndDate().toString());
+            rating.put("leadershipScore", r.getLeadershipScore() != null ? r.getLeadershipScore() : 0);
+            rating.put("teamManagementScore", r.getTeamManagementScore() != null ? r.getTeamManagementScore() : 0);
+            rating.put("communicationScore", r.getCommunicationScore() != null ? r.getCommunicationScore() : 0);
+            rating.put("resultsDeliveryScore", r.getResultsDeliveryScore() != null ? r.getResultsDeliveryScore() : 0);
+            rating.put("cultureChampionScore", r.getCultureChampionScore() != null ? r.getCultureChampionScore() : 0);
+            rating.put("averageScore", r.getAverageScore());
+            rating.put("areasOfStrength", r.getAreasOfStrength());
+            rating.put("areasForImprovement", r.getAreasForImprovement());
+            ratingData.add(rating);
         }
 
         return ResponseEntity.ok(Map.of(
