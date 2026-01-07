@@ -35,8 +35,9 @@ public interface AuraTrendAlertRepository extends JpaRepository<AuraTrendAlert, 
     AuraTrendAlert findLatestByEmployeeId(@Param("employeeId") UUID employeeId);
 
     // Get significant drops (> 10%) in last week
-    @Query("SELECT a FROM AuraTrendAlert a WHERE a.alertType = 'SCORE_DROP' " +
-           "AND a.changePercentage <= -10 AND a.createdAt >= CURRENT_DATE - 7 ORDER BY a.changePercentage ASC")
+    @Query(value = "SELECT * FROM aura_trend_alerts a WHERE a.alert_type = 'SCORE_DROP' " +
+           "AND a.change_percentage <= -10 AND a.created_at >= CURRENT_DATE - INTERVAL '7 days' ORDER BY a.change_percentage ASC", 
+           nativeQuery = true)
     List<AuraTrendAlert> findSignificantDropsLastWeek();
 
     // Get consistent trends (3+ weeks)
