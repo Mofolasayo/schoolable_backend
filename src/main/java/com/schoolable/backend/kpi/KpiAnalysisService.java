@@ -1,5 +1,7 @@
 package com.schoolable.backend.kpi;
 
+import com.schoolable.backend.performance.WeeklyPerformanceReport;
+import com.schoolable.backend.performance.WeeklyReportRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +41,9 @@ public class KpiAnalysisService {
 
     @Autowired
     private ProfileRepository profileRepository;
+
+    @Autowired
+    private WeeklyReportRepository weeklyReportRepository;
 
     // ==================== KPI MANAGEMENT ====================
 
@@ -190,7 +195,7 @@ public class KpiAnalysisService {
     // ==================== AI ANALYSIS ====================
 
     /**
-     * Trigger AI analysis for a specific week
+     * Trigger AI analysis for a specific week - now with team member feedback context
      */
     @Transactional
     public AiInsight generateWeeklyInsight(UUID teamLeadId, Integer weekNumber, Integer year) {
@@ -224,11 +229,67 @@ public class KpiAnalysisService {
             kpiData.add(data);
         }
 
-        // Call AI service
-        GeminiAiService.AiAnalysisResult aiResult = geminiService.analyzeWeeklyProgress(
+        // NEW: Collect team member feedback data from weekly reports for personalized insights
+        List<GeminiAiService.TeamMemberFeedback> memberFeedback = new ArrayList<>();
+        
+        // Get team members in the same department
+        List<Profile> teamMembers = profileRepository.findByDepartment(teamLead.getDepartment())
+                .stream()
+                .filter(p -> !p.getId().equals(teamLeadId))
+                .filter(p -> {
+                    String status = p.getStatus();
+                    return status == null || status.isEmpty() || 
+                           "active".equalsIgnoreCase(status) || 
+                           "pending".equalsIgnoreCase(status) ||
+                           "probation".equalsIgnoreCase(status);
+                })
+                .collect(Collectors.toList());
+
+        // Fetch weekly reports for team members for the specified week
+        for (Profile member : teamMembers) {
+            Optional<WeeklyPerformanceReport> reportOpt = weeklyReportRepository
+                    .findByEmployeeIdAndWeekNumberAndYear(member.getId(), weekNumber, year);
+            
+            if (reportOpt.isPresent()) {
+                WeeklyPerformanceReport report = reportOpt.get();
+                
+                GeminiAiService.TeamMemberFeedback feedback = new GeminiAiService.TeamMemberFeedback();
+                feedback.employeeName = member.getFullName();
+                feedback.role = member.getJobTitle();
+                feedback.technicalScore = report.getTechnicalScore();
+                feedback.behavioralScore = report.getBehavioralScore();
+                feedback.cultureFitScore = report.getCultureFitScore();
+                feedback.growthScore = report.getGrowthLearningScore();
+                feedback.highlights = report.getWeeklyHighlights();
+                feedback.areasForFocus = report.getAreasForFocus();
+                feedback.technicalNotes = report.getTechnicalNotes();
+                feedback.behavioralNotes = report.getBehavioralNotes();
+                
+                // Also get previous week data for trend analysis
+                Optional<WeeklyPerformanceReport> prevReportOpt = weeklyReportRepository
+                        .findByEmployeeIdAndWeekNumberAndYear(member.getId(), weekNumber - 1, year);
+                if (prevReportOpt.isPresent()) {
+                    WeeklyPerformanceReport prevReport = prevReportOpt.get();
+                    int avgThisWeek = (report.getTechnicalScore() + report.getBehavioralScore() + 
+                                       report.getCultureFitScore() + report.getGrowthLearningScore()) / 4;
+                    int avgPrevWeek = (prevReport.getTechnicalScore() + prevReport.getBehavioralScore() + 
+                                       prevReport.getCultureFitScore() + prevReport.getGrowthLearningScore()) / 4;
+                    feedback.trend = avgThisWeek > avgPrevWeek ? "improving" : 
+                                     avgThisWeek < avgPrevWeek ? "declining" : "stable";
+                } else {
+                    feedback.trend = "new";
+                }
+                
+                memberFeedback.add(feedback);
+            }
+        }
+
+        // Call AI service with enhanced context
+        GeminiAiService.AiAnalysisResult aiResult = geminiService.analyzeWeeklyProgressWithFeedback(
             teamLead.getFullName() + "'s Team",
             teamLead.getDepartment(),
             kpiData,
+            memberFeedback,
             weekNumber,
             year
         );

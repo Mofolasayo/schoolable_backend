@@ -74,6 +74,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/storage/status").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/login", "/auth/signup", "/auth/verify-email", "/auth/resend-verification").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/reset-password", "/auth/verify-reset-code", "/auth/complete-reset").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/hr/seed").permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(new JwtAuthFilter(jwtService), UsernamePasswordAuthenticationFilter.class);

@@ -34,10 +34,13 @@ public class ProfileController {
 
     private final ProfileRepository profileRepository;
     private final StorageService storageService;
+    private final com.schoolable.backend.hr.JobLevelRepository jobLevelRepository;
 
-    public ProfileController(ProfileRepository profileRepository, StorageService storageService) {
+    public ProfileController(ProfileRepository profileRepository, StorageService storageService,
+                             com.schoolable.backend.hr.JobLevelRepository jobLevelRepository) {
         this.profileRepository = profileRepository;
         this.storageService = storageService;
+        this.jobLevelRepository = jobLevelRepository;
     }
 
     @Operation(summary = "Get current user profile")
@@ -181,8 +184,22 @@ public class ProfileController {
             if (req.isTeamLead() != null) {
                 p.setIsTeamLead(req.isTeamLead());
             }
+
+            // Sync Employee Level, Job Level, and Grade
             if (req.employeeLevel() != null) {
                 p.setEmployeeLevel(req.employeeLevel());
+                
+                // Lookup Job Level to get correct Grade
+                var jobLevelOpt = jobLevelRepository.findByLevelNumber(req.employeeLevel());
+                if (jobLevelOpt.isPresent()) {
+                    var jobLevel = jobLevelOpt.get();
+                    p.setJobLevel(jobLevel.getLevelNumber());
+                    p.setGrade(jobLevel.getGrade());
+                } else {
+                    // Fallback: If no job level found, assume default or linear mapping? 
+                    // For now, just set jobLevel to employeeLevel to at least have it saved
+                    p.setJobLevel(req.employeeLevel());
+                }
             }
 
             p.setStatus("active");

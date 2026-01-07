@@ -383,4 +383,26 @@ public class Profile {
     public void setYearsOfExperience(Integer yearsOfExperience) {
         this.yearsOfExperience = yearsOfExperience;
     }
+
+    @Column(name = "reference_face_url")
+    private String referenceFaceUrl;
+
+    @Column(name = "reference_face_registered_at")
+    private OffsetDateTime referenceFaceRegisteredAt;
+
+    public String getReferenceFaceUrl() {
+        return referenceFaceUrl;
+    }
+
+    public void setReferenceFaceUrl(String referenceFaceUrl) {
+        this.referenceFaceUrl = referenceFaceUrl;
+    }
+
+    public OffsetDateTime getReferenceFaceRegisteredAt() {
+        return referenceFaceRegisteredAt;
+    }
+
+    public void setReferenceFaceRegisteredAt(OffsetDateTime referenceFaceRegisteredAt) {
+        this.referenceFaceRegisteredAt = referenceFaceRegisteredAt;
+    }
 }

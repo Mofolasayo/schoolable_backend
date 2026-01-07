@@ -36,15 +36,42 @@ public class TeamLeadController {
     private final WeeklyReportRepository weeklyReportRepository;
     private final AuraDashboardService auraDashboardService;
 
+    private final com.schoolable.backend.kpi.TeamAiInsightsService teamAiInsightsService;
+
     public TeamLeadController(
             ProfileRepository profileRepository,
             TaskRepository taskRepository,
             WeeklyReportRepository weeklyReportRepository,
-            AuraDashboardService auraDashboardService) {
+            AuraDashboardService auraDashboardService,
+            com.schoolable.backend.kpi.TeamAiInsightsService teamAiInsightsService) {
         this.profileRepository = profileRepository;
         this.taskRepository = taskRepository;
         this.weeklyReportRepository = weeklyReportRepository;
         this.auraDashboardService = auraDashboardService;
+        this.teamAiInsightsService = teamAiInsightsService;
+    }
+
+    /**
+     * Get AI-generated strategic insights for the team.
+     */
+    @Operation(summary = "Get AI Team Insights")
+    @GetMapping("/ai-insights")
+    public ResponseEntity<?> getTeamAiInsights(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        try {
+            UUID teamLeadId = (UUID) auth.getPrincipal();
+            Map<String, Object> insights = teamAiInsightsService.generateTeamInsights(teamLeadId);
+            
+            if (insights.containsKey("error")) {
+                return ResponseEntity.badRequest().body(insights); 
+            }
+            return ResponseEntity.ok(insights);
+        } catch (Exception e) {
+             return ResponseEntity.status(500).body(Map.of("error", "Failed to generate team insights: " + e.getMessage()));
+        }
     }
 
     /**
@@ -85,27 +112,50 @@ public class TeamLeadController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Team lead does not belong to a department"));
             }
             
-            // Get team members (same department, excluding self)
-            List<Profile> teamMembers = profileRepository.findByDepartment(department)
+            // Get active team members (same department, INCLUDING the team lead)
+            // Include members with active, pending, or unset status
+            List<Profile> allDepartmentMembers = profileRepository.findByDepartment(department)
                     .stream()
+                    .filter(p -> {
+                        String status = p.getStatus();
+                        // Include if status is active, pending, probation, or null/empty
+                        return status == null || status.isEmpty() || 
+                               "active".equalsIgnoreCase(status) || 
+                               "pending".equalsIgnoreCase(status) ||
+                               "probation".equalsIgnoreCase(status);
+                    })
+                    .collect(Collectors.toList());
+            
+            // Team size includes all members including team lead
+            int teamSize = allDepartmentMembers.size();
+            
+            // Get all member IDs including team lead for task counting
+            Set<UUID> memberIds = allDepartmentMembers.stream().map(Profile::getId).collect(Collectors.toSet());
+            
+            // Team members list excludes team lead (for display purposes like weekly reports)
+            List<Profile> teamMembers = allDepartmentMembers.stream()
                     .filter(p -> !p.getId().equals(teamLeadId))
                     .collect(Collectors.toList());
             
-            int teamSize = teamMembers.size();
-            
             // Get task statistics for the team
-            long tasksCompleted = taskRepository.findAll().stream()
-                    .filter(t -> teamMembers.stream().anyMatch(m -> m.getId().equals(t.getAssigneeId())))
-                    .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()))
+            // Filter tasks by either assignee being a team member OR organization matching the department
+            List<com.schoolable.backend.task.Task> allTasks = taskRepository.findAll();
+            
+            // Filter tasks that belong to this team (by assignee OR by organization)
+            List<com.schoolable.backend.task.Task> teamTasks = allTasks.stream()
+                    .filter(t -> memberIds.contains(t.getAssigneeId()) || 
+                                 (t.getOrganization() != null && t.getOrganization().equalsIgnoreCase(department)))
+                    .collect(Collectors.toList());
+            
+            long tasksCompleted = teamTasks.stream()
+                    .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()) || "Done".equalsIgnoreCase(t.getStatus()))
                     .count();
             
-            long tasksInProgress = taskRepository.findAll().stream()
-                    .filter(t -> teamMembers.stream().anyMatch(m -> m.getId().equals(t.getAssigneeId())))
+            long tasksInProgress = teamTasks.stream()
                     .filter(t -> "In Progress".equalsIgnoreCase(t.getStatus()))
                     .count();
             
-            long tasksPending = taskRepository.findAll().stream()
-                    .filter(t -> teamMembers.stream().anyMatch(m -> m.getId().equals(t.getAssigneeId())))
+            long tasksPending = teamTasks.stream()
                     .filter(t -> "Pending".equalsIgnoreCase(t.getStatus()) || "To Do".equalsIgnoreCase(t.getStatus()))
                     .count();
             
@@ -117,16 +167,18 @@ public class TeamLeadController {
             long reportsSubmittedThisWeek = weeklyReportRepository.findByReviewerIdAndWeekNumberAndYear(
                     teamLeadId, currentWeek, currentYear).size();
             
-            boolean weeklyReportsComplete = reportsSubmittedThisWeek >= teamSize && teamSize > 0;
+            // Reports are only submitted for team members (excluding team lead)
+            int reportsRequired = teamMembers.size();
+            boolean weeklyReportsComplete = reportsSubmittedThisWeek >= reportsRequired && reportsRequired > 0;
             
-            // Calculate average team Aura score
+            // Calculate average team Aura score (0-100 scale percentage)
             double totalAura = 0;
             int membersWithAura = 0;
             for (Profile member : teamMembers) {
                 try {
                     EmployeeAuraResponse auraData = auraDashboardService.getEmployeeAuraDashboard(member.getId());
                     if (auraData != null && auraData.getAuraScore() != null) {
-                        totalAura += auraData.getAuraScore();
+                        totalAura += auraData.getAuraScore(); // Keep as 100-scale percentage
                         membersWithAura++;
                     }
                 } catch (Exception ignored) {
@@ -155,7 +207,7 @@ public class TeamLeadController {
             weeklyStatus.put("current_week", currentWeek);
             weeklyStatus.put("year", currentYear);
             weeklyStatus.put("reports_submitted", reportsSubmittedThisWeek);
-            weeklyStatus.put("reports_required", teamSize);
+            weeklyStatus.put("reports_required", reportsRequired);
             weeklyStatus.put("is_complete", weeklyReportsComplete);
             stats.put("weekly_reports", weeklyStatus);
             
@@ -217,9 +269,17 @@ public class TeamLeadController {
             int currentYear = now.getYear();
             
             // Get team members (same department, optionally including self)
+            // Include members with active, pending, or unset status
             List<Profile> teamMembers = profileRepository.findByDepartment(department)
                     .stream()
                     .filter(p -> includeSelf || !p.getId().equals(teamLeadId))
+                    .filter(p -> {
+                        String status = p.getStatus();
+                        return status == null || status.isEmpty() || 
+                               "active".equalsIgnoreCase(status) || 
+                               "pending".equalsIgnoreCase(status) ||
+                               "probation".equalsIgnoreCase(status);
+                    })
                     .collect(Collectors.toList());
             
             // Build response for each team member

@@ -118,6 +118,8 @@ public class HRManagementService {
             lead.put("email", employee.getEmail());
             lead.put("role", employee.getJobTitle());
             lead.put("department", employee.getDepartment());
+            lead.put("employeeId", employee.getEmployeeId());
+            lead.put("gender", employee.getGender());
             lead.put("appointmentId", appointment.getId());
             lead.put("status", appointment.getStatus());
             lead.put("appointedAt", appointment.getAppointedAt());
@@ -504,7 +506,24 @@ public class HRManagementService {
         dto.put("isTeamLead", profile.getIsTeamLead());
         dto.put("hireDate", profile.getHireDate());
         dto.put("yearsOfExperience", profile.getYearsOfExperience());
-        dto.put("avatar", "https://api.dicebear.com/7.x/avataaars/svg?seed=" + profile.getId());
+        dto.put("status", profile.getStatus());
+        dto.put("employeeId", profile.getEmployeeId());
+        dto.put("gender", profile.getGender());
+        
+        // Generate gender-based avatar URL
+        String seed = profile.getEmployeeId() != null ? profile.getEmployeeId() : 
+                      (profile.getEmail() != null ? profile.getEmail() : profile.getId().toString());
+        String gender = profile.getGender();
+        String avatarUrl;
+        if ("male".equalsIgnoreCase(gender)) {
+            avatarUrl = "https://api.dicebear.com/7.x/adventurer/svg?seed=" + seed + "&gender=male";
+        } else if ("female".equalsIgnoreCase(gender)) {
+            avatarUrl = "https://api.dicebear.com/7.x/adventurer/svg?seed=" + seed + "&gender=female";
+        } else {
+            avatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=" + seed;
+        }
+        dto.put("avatar", avatarUrl);
+        
         return dto;
     }
 
@@ -560,9 +579,50 @@ public class HRManagementService {
         return dto;
     }
 
+    @Autowired
+    private com.schoolable.backend.performance.EnhancedAuraService enhancedAuraService;
+
     private Double getEmployeeAuraScore(UUID employeeId) {
-        // This would integrate with the Aura calculation service
-        // For now, return a placeholder
-        return null;
+        try {
+            var dashboard = enhancedAuraService.getEnhancedAuraDashboard(employeeId);
+            Double score = dashboard.getAuraScore(); // out of 100
+            if (score == null) return null;
+            return score / 20.0; // Convert to 0-5 scale
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    @Transactional
+    public void seedHRData() {
+        List<Profile> all = profileRepository.findAll();
+        if (all.isEmpty()) return;
+        
+        Collections.shuffle(all);
+        UUID adminId = all.get(0).getId(); // Use first as admin
+        
+        // Seed Probations
+        if (probationRepository.count() == 0) {
+            int count = Math.min(all.size(), 3);
+            for (int i = 0; i < count; i++) {
+                createProbation(all.get(i).getId(), LocalDate.now().minusMonths(1), 3, adminId, adminId);
+            }
+        }
+        
+        // Seed PIPs
+        if (pipRepository.count() == 0) {
+            int start = Math.min(all.size(), 3);
+            int count = Math.min(all.size() - start, 2);
+            for (int i = 0; i < count; i++) {
+                createPip(all.get(start + i).getId(), "Performance below 50%", new BigDecimal("45.0"), "Q1", 2024, adminId, adminId);
+            }
+        }
+        
+        // Seed Team Leads
+        if (teamLeadRepository.count() == 0) {
+            int start = Math.min(all.size(), 5);
+            if (all.size() > start) {
+                appointTeamLead(all.get(start).getId(), "Engineering Team", adminId);
+            }
+        }
     }
 }

@@ -83,6 +83,9 @@ public class AutoAuraCalculationService {
     @Autowired
     private PeerHelpfulnessRepository peerHelpfulnessRepository;
 
+    @Autowired(required = false)
+    private DailyReportRepository dailyReportRepository;
+
     // ============================================================
     // SCHEDULED AUTO-CALCULATION
     // Runs every Sunday at 2 AM to calculate weekly scores
@@ -242,6 +245,8 @@ public class AutoAuraCalculationService {
                     return calculateComplianceMetric(employeeId, metricKey, metricConfig, quarterStart, now);
                 case "training":
                     return calculateTrainingMetric(employeeId, metricKey, metricConfig, quarterStart, now);
+                case "daily_reports":
+                    return calculateDailyReportMetric(employeeId, metricKey, metricConfig, quarterStart, now);
                 case "weekly_report":
                     return calculateTeamLeadRating(employeeId, metricKey, metricConfig, quarterStart);
                 case "aura":
@@ -420,6 +425,52 @@ public class AutoAuraCalculationService {
         }
 
         switch (metricKey) {
+            case "attendance_punctuality":
+                // MERGED: Attendance + Punctuality with lateness penalties
+                if (workDays == 0) return 100.0;
+                
+                // Calculate weighted score for each day
+                double totalScore = 0.0;
+                int daysScored = 0;
+                
+                for (Attendance att : quarterAttendances) {
+                    if (att.getCheckIn() != null) {
+                        int hour = att.getCheckIn().getHour();
+                        int minute = att.getCheckIn().getMinute();
+                        int totalMinutes = (hour * 60) + minute;
+                        int nineAM = 9 * 60; // 9:00 AM in minutes
+                        
+                        double dayScore;
+                        if (totalMinutes <= nineAM) {
+                            // On time or early = 100%
+                            dayScore = 100.0;
+                        } else if (totalMinutes <= nineAM + 15) {
+                            // 1-15 minutes late = 95%
+                            dayScore = 95.0;
+                        } else if (totalMinutes <= nineAM + 30) {
+                            // 16-30 minutes late = 85%
+                            dayScore = 85.0;
+                        } else if (totalMinutes <= nineAM + 60) {
+                            // 31-60 minutes late = 70%
+                            dayScore = 70.0;
+                        } else {
+                            // More than 1 hour late = 50%
+                            dayScore = 50.0;
+                        }
+                        
+                        totalScore += dayScore;
+                        daysScored++;
+                    }
+                }
+                
+                // Average the scores and adjust for absence rate
+                double avgDayScore = daysScored > 0 ? totalScore / daysScored : 0.0;
+                double attendanceRate = (daysScored * 100.0) / workDays;
+                
+                // Final score = (attendance rate × 60%) + (average punctuality × 40%)
+                // This ensures absent days hurt the score significantly
+                return (attendanceRate * 0.6) + (avgDayScore * (daysScored / (double) workDays) * 0.4);
+
             case "attendance_rate":
             case "attendance":
                 // Days present / Expected work days
@@ -437,25 +488,45 @@ public class AutoAuraCalculationService {
                     (onTime * 100.0) / quarterAttendances.size();
 
             case "consistency":
-                // Low variance in check-in times (simplified)
+                // Improved consistency calculation
                 if (quarterAttendances.size() < 5) return 80.0;
                 
-                // Calculate average check-in hour
-                double avgHour = quarterAttendances.stream()
+                // Calculate standard deviation of check-in times
+                List<Integer> checkInMinutes = quarterAttendances.stream()
                     .filter(a -> a.getCheckIn() != null)
-                    .mapToInt(a -> a.getCheckIn().getHour() * 60 + a.getCheckIn().getMinute())
-                    .average()
-                    .orElse(540); // 9 AM default
+                    .map(a -> a.getCheckIn().getHour() * 60 + a.getCheckIn().getMinute())
+                    .toList();
                 
-                // If mostly before 9:30 AM = consistent
-                return avgHour < 570 ? 90.0 : (avgHour < 600 ? 70.0 : 50.0);
+                if (checkInMinutes.isEmpty()) return 0.0;
+                
+                double mean = checkInMinutes.stream()
+                    .mapToInt(Integer::intValue)
+                    .average()
+                    .orElse(540.0);
+                
+                double variance = checkInMinutes.stream()
+                    .mapToDouble(m -> Math.pow(m - mean, 2))
+                    .average()
+                    .orElse(0);
+                
+                double stdDev = Math.sqrt(variance);
+                
+                // Score based on standard deviation
+                // Very consistent (stdDev < 15 min) = 95%+
+                // Fairly consistent (stdDev < 30 min) = 80%+
+                // Somewhat consistent (stdDev < 60 min) = 60%+
+                // Inconsistent (stdDev >= 60 min) = <60%
+                if (stdDev < 15) return Math.min(100, 100 - stdDev);
+                if (stdDev < 30) return Math.min(90, 90 - (stdDev - 15) / 2);
+                if (stdDev < 60) return Math.min(75, 75 - (stdDev - 30) / 3);
+                return Math.max(30, 60 - (stdDev - 60) / 2);
 
             case "reliability":
                 // Based on attendance consistency
                 return calculateAttendanceMetric(employeeId, "attendance_rate", config, quarterStart, now);
 
             default:
-                return calculateAttendanceMetric(employeeId, "attendance_rate", config, quarterStart, now);
+                return calculateAttendanceMetric(employeeId, "attendance_punctuality", config, quarterStart, now);
         }
     }
 
@@ -549,6 +620,77 @@ public class AutoAuraCalculationService {
         } catch (Exception e) {
             System.err.println("Training metric error: " + e.getMessage());
             return 0.0; // Return 0 if training module not available, not fake 50%
+        }
+    }
+
+    // ============================================================
+    // DAILY REPORT METRICS (100% Automated)
+    // Integrates daily report AI scores into Technical Competence
+    // ============================================================
+
+    private double calculateDailyReportMetric(UUID employeeId, String metricKey,
+            DepartmentKpiConfig.MetricConfig config, LocalDate quarterStart, LocalDate now) {
+
+        if (dailyReportRepository == null) {
+            // Daily reports module not available
+            return 0.0;
+        }
+
+        try {
+            List<DailyReport> reports = dailyReportRepository.findByEmployeeAndDateRange(
+                employeeId, quarterStart, now);
+
+            if (reports.isEmpty()) {
+                return 0.0; // No reports = 0 score
+            }
+
+            switch (metricKey) {
+                case "daily_report_submission":
+                case "report_submission_rate":
+                    // Calculate expected work days in the period
+                    long workDays = 0;
+                    for (LocalDate date = quarterStart; !date.isAfter(now); date = date.plusDays(1)) {
+                        if (date.getDayOfWeek() != DayOfWeek.SATURDAY && 
+                            date.getDayOfWeek() != DayOfWeek.SUNDAY) {
+                            workDays++;
+                        }
+                    }
+                    // Score based on submission rate (expected 100% on work days)
+                    return workDays > 0 ? Math.min(100, (reports.size() * 100.0) / workDays) : 0.0;
+
+                case "daily_report_quality":
+                case "report_ai_score":
+                    // Average AI score from daily reports
+                    double avgAiScore = reports.stream()
+                        .filter(r -> r.getAiScore() != null)
+                        .mapToDouble(r -> r.getAiScore().doubleValue())
+                        .average()
+                        .orElse(0.0);
+                    return avgAiScore;
+
+                case "kpi_alignment":
+                case "daily_kpi_alignment":
+                    // Average KPI alignment score from daily reports
+                    double avgKpiAlignment = reports.stream()
+                        .filter(r -> r.getKpiAlignmentScore() != null)
+                        .mapToDouble(r -> r.getKpiAlignmentScore().doubleValue())
+                        .average()
+                        .orElse(0.0);
+                    return avgKpiAlignment;
+
+                case "daily_report_score":
+                case "daily_productivity":
+                default:
+                    // Combined score: 40% submission rate + 60% AI score
+                    double submissionRate = calculateDailyReportMetric(
+                        employeeId, "daily_report_submission", config, quarterStart, now);
+                    double aiQuality = calculateDailyReportMetric(
+                        employeeId, "daily_report_quality", config, quarterStart, now);
+                    return (submissionRate * 0.4) + (aiQuality * 0.6);
+            }
+        } catch (Exception e) {
+            System.err.println("Daily report metric error: " + e.getMessage());
+            return 0.0;
         }
     }
 

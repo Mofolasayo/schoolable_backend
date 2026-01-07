@@ -422,6 +422,15 @@ public class HRManagementController {
         ));
     }
 
+    /**
+     * Seed HR data for testing.
+     */
+    @PostMapping("/seed")
+    public ResponseEntity<?> seedHRData() {
+        hrService.seedHRData();
+        return ResponseEntity.ok(Map.of("message", "HR Data seeded successfully"));
+    }
+
     // =====================================================
     // HELPER METHODS
     // =====================================================

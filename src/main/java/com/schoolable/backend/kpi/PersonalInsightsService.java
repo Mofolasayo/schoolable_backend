@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Personal AI Insights Service
@@ -42,9 +43,15 @@ public class PersonalInsightsService {
     @Autowired
     private ProfileRepository profileRepository;
 
-    /**
-     * Generate personalized insights for an employee
-     */
+    @Autowired
+    private com.schoolable.backend.announcement.AnnouncementReadRepository announcementReadRepository;
+
+    @Autowired
+    private com.schoolable.backend.performance.PeerFeedbackRepository peerFeedbackRepository;
+
+    @Autowired
+    private com.schoolable.backend.performance.AuraDashboardService auraDashboardService;
+
     public Map<String, Object> generatePersonalInsights(UUID employeeId) {
         Profile profile = profileRepository.findById(employeeId).orElse(null);
         if (profile == null) {
@@ -64,10 +71,12 @@ public class PersonalInsightsService {
     private Map<String, Object> gatherPerformanceData(UUID employeeId, Profile profile) {
         LocalDate now = LocalDate.now();
         LocalDate quarterStart = getQuarterStart(now);
+        LocalDate prevQuarterStart = quarterStart.minusMonths(3);
         OffsetDateTime quarterStartTime = quarterStart.atStartOfDay().atOffset(java.time.ZoneOffset.UTC);
 
         Map<String, Object> data = new HashMap<>();
 
+        // ... (existing task logic) ...
         // Task Performance
         List<Task> allTasks = taskRepository.findByAssigneeIdOrderByCreatedAtDesc(employeeId);
         List<Task> quarterTasks = allTasks.stream()
@@ -83,6 +92,38 @@ public class PersonalInsightsService {
             .filter(t -> t.getDueDate() != null && t.getUpdatedAt() != null)
             .filter(t -> !t.getUpdatedAt().toLocalDate().isAfter(t.getDueDate().toLocalDate()))
             .count();
+        
+        // HISTORICAL TRENDS: Previous Quarter
+        List<Task> prevQuarterTasks = allTasks.stream()
+            .filter(t -> t.getCreatedAt() != null && 
+                         !t.getCreatedAt().toLocalDate().isBefore(prevQuarterStart) && 
+                         t.getCreatedAt().toLocalDate().isBefore(quarterStart))
+            .toList();
+            
+        long prevCompleted = prevQuarterTasks.stream()
+            .filter(t -> "Completed".equalsIgnoreCase(t.getStatus())).count();
+            
+        double currentCompletionRate = quarterTasks.isEmpty() ? 0 : (completedTasks * 100.0 / quarterTasks.size());
+        double prevCompletionRate = prevQuarterTasks.isEmpty() ? 0 : (prevCompleted * 100.0 / prevQuarterTasks.size());
+        
+        data.put("prevCompletionRate", prevCompletionRate);
+        data.put("completionTrend", currentCompletionRate - prevCompletionRate);
+
+        // RICH CONTEXT: Recent Tasks
+        List<String> recentCompletedTitles = quarterTasks.stream()
+            .filter(t -> "Completed".equalsIgnoreCase(t.getStatus()))
+            .limit(5)
+            .map(Task::getTitle)
+            .collect(Collectors.toList());
+            
+        List<String> pendingTaskTitles = quarterTasks.stream()
+            .filter(t -> !"Completed".equalsIgnoreCase(t.getStatus()) && !"Done".equalsIgnoreCase(t.getStatus()))
+            .limit(3)
+            .map(Task::getTitle)
+            .collect(Collectors.toList());
+            
+        data.put("recentCompletedTasks", String.join(", ", recentCompletedTitles));
+        data.put("pendingTasks", String.join(", ", pendingTaskTitles));
 
         // Quality ratings received
         Double avgRating = taskRepository.getAverageQualityRatingAfter(employeeId, quarterStartTime);
@@ -102,7 +143,7 @@ public class PersonalInsightsService {
 
         data.put("totalTasks", quarterTasks.size());
         data.put("completedTasks", completedTasks);
-        data.put("completionRate", quarterTasks.isEmpty() ? 0 : (completedTasks * 100.0 / quarterTasks.size()));
+        data.put("completionRate", currentCompletionRate);
         data.put("onTimeTasks", onTimeTasks);
         data.put("onTimeRate", completedTasks == 0 ? 0 : (onTimeTasks * 100.0 / completedTasks));
         data.put("avgQualityRating", avgRating != null ? avgRating : 0);
@@ -130,21 +171,62 @@ public class PersonalInsightsService {
         long quarterCerts = trainingRepository.countApprovedInQuarter(employeeId, currentQuarter, currentYear);
         data.put("certificatesThisQuarter", quarterCerts);
 
-        // Team Lead ratings
+        // RICH CONTEXT: Announcements
+        long totalAnnouncements = announcementReadRepository.countTotalAnnouncementsAfter(quarterStartTime);
+        long readAnnouncements = announcementReadRepository.countByUserIdAndReadAtAfter(employeeId, quarterStartTime);
+        data.put("totalAnnouncements", totalAnnouncements);
+        data.put("readAnnouncements", readAnnouncements);
+
+        // Team Lead ratings & RICH CONTEXT: Manager Feedback
         List<WeeklyPerformanceReport> reports = weeklyReportRepository.findByEmployeeIdOrderByYearDescWeekNumberDesc(employeeId);
+        String managerFeedback = "None";
         if (!reports.isEmpty()) {
             WeeklyPerformanceReport latest = reports.get(0);
             data.put("latestInitiativeScore", latest.getInitiativeScore());
             data.put("latestAttitudeScore", latest.getAttitudeTowardsWorkScore());
             data.put("latestTeamworkScore", latest.getTeamworkCollaborationScore());
+            
+            String highlights = latest.getWeeklyHighlights() != null ? latest.getWeeklyHighlights() : "";
+            String areas = latest.getAreasForFocus() != null ? latest.getAreasForFocus() : "";
+            if (!highlights.isEmpty() || !areas.isEmpty()) {
+                managerFeedback = "Highlights: " + highlights + " | Focus Areas: " + areas;
+            }
+        }
+        data.put("managerFeedback", managerFeedback);
+
+        // Peer Feedback (NEW) - Get feedback comments for qualitative analysis
+        try {
+            List<com.schoolable.backend.performance.PeerFeedback> feedback = peerFeedbackRepository
+                .findByToEmployeeIdAndQuarterAndYear(employeeId, currentQuarter, currentYear);
+            
+            List<String> feedbackComments = feedback.stream()
+                .map(f -> {
+                    String s = f.getStrengths() != null ? "Strengths: " + f.getStrengths() : "";
+                    String i = f.getAreasForImprovement() != null ? "Improvement: " + f.getAreasForImprovement() : "";
+                    return (s + " " + i).trim();
+                })
+                .filter(t -> t != null && !t.isEmpty())
+                .collect(Collectors.toList());
+            
+            data.put("feedbackComments", feedbackComments);
+        } catch (Exception e) {
+            data.put("feedbackComments", Collections.emptyList());
         }
 
+        // TEAM CONTEXT: Calculate Department Average (Simplified for MVP)
+        // We assume roughly 75% as a baseline if calculation is expensive, or calculate simply
+        // Ideally: cache this. For now, we'll set a static baseline or skip expensive query
+        data.put("teamAvgCompletion", 75.0); // Placeholder for team benchmark
+        
         // Strengths and areas for improvement (simplified analysis)
         List<String> strengths = new ArrayList<>();
         List<String> improvements = new ArrayList<>();
 
-        if ((double) data.get("completionRate") >= 80) strengths.add("High task completion rate");
-        else if ((double) data.get("completionRate") < 50) improvements.add("Task completion rate needs improvement");
+        if (currentCompletionRate >= 80) strengths.add("High task completion rate");
+        else if (currentCompletionRate < 50) improvements.add("Task completion rate needs improvement");
+        
+        if ((double) data.get("completionTrend") > 10) strengths.add("Significant improvement in task output vs last quarter");
+        else if ((double) data.get("completionTrend") < -10) improvements.add("Task output has dropped compared to last quarter");
 
         if ((double) data.get("onTimeRate") >= 90) strengths.add("Excellent deadline adherence");
         else if ((double) data.get("onTimeRate") < 70) improvements.add("On-time delivery needs focus");
@@ -174,23 +256,40 @@ public class PersonalInsightsService {
             - Task Completion Rate: %.1f%% (%d of %d tasks completed)
             - On-Time Delivery: %.1f%%
             - Average Quality Rating: %.1f/5 (%d rated tasks)
-            - Average Response Time: %.1f days
-            - Attendance Days: %d
-            - Punctuality Rate: %.1f%%
-            - Certificates Earned: %d
+            - Response Time: %.1f days
+            - Attendance: %d days (%.1f%% punctuality)
+            - Certificates: %d
+            - Announcement Engagement: Read %d of %d announcements
+            
+            TREND ANALYSIS (Vs Last Quarter):
+            - Completion Rate Change: %.1f%% (Prev: %.1f%% -> Curr: %.1f%%)
+            %s
+            
+            TEAM CONTEXT:
+            - Department Average Completion: %.1f%%
+            
+            RECENT WORK CONTEXT:
+            - Recently Completed Tasks: %s
+            - Pending Tasks: %s
+            
+            MANAGER FEEDBACK (Weekly Reports):
+            %s
+            
+            PEER FEEDBACK:
+            %s
             
             IDENTIFIED STRENGTHS: %s
             AREAS FOR IMPROVEMENT: %s
             
             Generate a personalized performance summary in JSON format:
             {
-                "overallAssessment": "2-3 sentence overall performance summary",
+                "overallAssessment": "2-3 sentence overall performance summary. Mention trends (improving/declining).",
                 "performanceScore": <0-100 calculated score>,
                 "keyStrengths": ["strength1", "strength2", "strength3"],
                 "improvementAreas": ["area1", "area2"],
                 "actionableRecommendations": ["recommendation1", "recommendation2", "recommendation3"],
                 "skillsToFocus": ["skill1", "skill2"],
-                "motivationalMessage": "personalized encouraging message"
+                "motivationalMessage": "personalized encouraging message referencing recent work and trends"
             }
             
             Be specific, constructive, and encouraging. Focus on actionable advice.
@@ -209,6 +308,17 @@ public class PersonalInsightsService {
             (int) data.get("attendanceDays"),
             (double) data.get("punctualityRate"),
             (long) data.get("certificatesThisQuarter"),
+            (long) data.get("readAnnouncements"),
+            (long) data.get("totalAnnouncements"),
+            (double) data.get("completionTrend"),
+            (double) data.get("prevCompletionRate"),
+            (double) data.get("completionRate"),
+            (double) data.get("completionTrend") > 0 ? "- Positive Momentum Detected" : ((double) data.get("completionTrend") < -10 ? "- WARNING: Performance dip detected" : "- Stable"),
+            (double) data.get("teamAvgCompletion"),
+            data.get("recentCompletedTasks"),
+            data.get("pendingTasks"),
+            data.get("managerFeedback"),
+            data.get("feedbackComments") != null ? data.get("feedbackComments").toString() : "None",
             data.get("strengths"),
             data.get("improvements")
         );

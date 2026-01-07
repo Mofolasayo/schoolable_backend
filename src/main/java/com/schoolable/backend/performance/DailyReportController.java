@@ -1,0 +1,508 @@
+package com.schoolable.backend.performance;
+
+import com.schoolable.backend.kpi.GeminiAiService;
+import com.schoolable.backend.kpi.IndividualKpi;
+import com.schoolable.backend.kpi.IndividualKpiRepository;
+import com.schoolable.backend.profile.Profile;
+import com.schoolable.backend.profile.ProfileRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.temporal.WeekFields;
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * Controller for Daily Reports
+ * Staff submit daily reports which are AI-graded and contribute to Technical Competence pillar.
+ */
+@RestController
+@RequestMapping("/api/daily-reports")
+@Tag(name = "Daily Reports")
+public class DailyReportController {
+
+    @Autowired
+    private DailyReportRepository dailyReportRepository;
+
+    @Autowired
+    private ProfileRepository profileRepository;
+
+    @Autowired
+    private IndividualKpiRepository individualKpiRepository;
+
+    @Autowired
+    private GeminiAiService aiService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    // ==================== MY REPORTS ====================
+
+    @Operation(summary = "Get my daily reports")
+    @GetMapping("/my")
+    public ResponseEntity<?> getMyReports(
+            Authentication auth,
+            @RequestParam(required = false) Integer limit
+    ) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        List<DailyReport> reports;
+        if (limit != null && limit > 0) {
+            reports = dailyReportRepository.findByEmployeeIdOrderByReportDateDesc(
+                userId, org.springframework.data.domain.PageRequest.of(0, limit)
+            );
+        } else {
+            reports = dailyReportRepository.findByEmployeeIdOrderByReportDateDesc(userId);
+        }
+
+        return ResponseEntity.ok(reports.stream().map(this::toDto).collect(Collectors.toList()));
+    }
+
+    @Operation(summary = "Get today's report status")
+    @GetMapping("/today")
+    public ResponseEntity<?> getTodayReport(Authentication auth) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        LocalDate today = LocalDate.now();
+
+        Optional<DailyReport> report = dailyReportRepository.findByEmployeeIdAndReportDate(userId, today);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("hasSubmittedToday", report.isPresent());
+        response.put("date", today.toString());
+        
+        if (report.isPresent()) {
+            response.put("report", toDto(report.get()));
+        }
+
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Submit a daily report")
+    @PostMapping
+    public ResponseEntity<?> submitReport(Authentication auth, @RequestBody SubmitReportRequest request) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        LocalDate reportDate = request.reportDate() != null ? request.reportDate() : LocalDate.now();
+
+        // Check if already submitted for this date
+        Optional<DailyReport> existing = dailyReportRepository.findByEmployeeIdAndReportDate(userId, reportDate);
+        if (existing.isPresent()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Report already submitted for " + reportDate,
+                "existingReportId", existing.get().getId()
+            ));
+        }
+
+        // Validate content
+        if (request.tasksCompleted() == null || request.tasksCompleted().trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Tasks completed is required"));
+        }
+
+        // Create report
+        DailyReport report = new DailyReport();
+        report.setEmployeeId(userId);
+        report.setReportDate(reportDate);
+        report.setTasksCompleted(request.tasksCompleted());
+        report.setTasksInProgress(request.tasksInProgress());
+        report.setBlockers(request.blockers());
+        report.setPlannedForTomorrow(request.plannedForTomorrow());
+        report.setAdditionalNotes(request.additionalNotes());
+        report.setAttachmentUrl(request.attachmentUrl());
+        report.setAttachmentName(request.attachmentName());
+
+        report = dailyReportRepository.save(report);
+
+        // Trigger AI grading asynchronously (or sync for MVP)
+        try {
+            gradeReportWithAi(report, userId);
+        } catch (Exception e) {
+            System.err.println("AI grading failed: " + e.getMessage());
+            // Continue - report is saved, can grade later
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Daily report submitted successfully",
+            "report", toDto(report)
+        ));
+    }
+
+    @Operation(summary = "Update a daily report (same day only)")
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateReport(
+            Authentication auth,
+            @PathVariable Long id,
+            @RequestBody SubmitReportRequest request
+    ) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        Optional<DailyReport> reportOpt = dailyReportRepository.findById(id);
+        if (reportOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Report not found"));
+        }
+
+        DailyReport report = reportOpt.get();
+        if (!report.getEmployeeId().equals(userId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Can only edit your own reports"));
+        }
+
+        // Only allow edits on same day
+        if (!report.getReportDate().equals(LocalDate.now())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Can only edit today's report"));
+        }
+
+        // Update fields
+        if (request.tasksCompleted() != null) report.setTasksCompleted(request.tasksCompleted());
+        if (request.tasksInProgress() != null) report.setTasksInProgress(request.tasksInProgress());
+        if (request.blockers() != null) report.setBlockers(request.blockers());
+        if (request.plannedForTomorrow() != null) report.setPlannedForTomorrow(request.plannedForTomorrow());
+        if (request.additionalNotes() != null) report.setAdditionalNotes(request.additionalNotes());
+        if (request.attachmentUrl() != null) report.setAttachmentUrl(request.attachmentUrl());
+        if (request.attachmentName() != null) report.setAttachmentName(request.attachmentName());
+
+        report = dailyReportRepository.save(report);
+
+        // Re-grade with AI
+        try {
+            gradeReportWithAi(report, userId);
+        } catch (Exception e) {
+            System.err.println("AI re-grading failed: " + e.getMessage());
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Report updated successfully",
+            "report", toDto(report)
+        ));
+    }
+
+    // ==================== STATS ====================
+
+    @Operation(summary = "Get my report stats")
+    @GetMapping("/stats")
+    public ResponseEntity<?> getMyStats(Authentication auth) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        // Get this week's reports
+        LocalDate today = LocalDate.now();
+        LocalDate weekStart = today.with(WeekFields.ISO.dayOfWeek(), 1);
+        LocalDate weekEnd = weekStart.plusDays(6);
+
+        Long weeklyCount = dailyReportRepository.countByEmployeeAndWeek(userId, weekStart, weekEnd);
+        Double weeklyAvgScore = dailyReportRepository.getAverageAiScore(userId, weekStart, weekEnd);
+
+        // Get this month's average
+        LocalDate monthStart = today.withDayOfMonth(1);
+        Double monthlyAvgScore = dailyReportRepository.getAverageAiScore(userId, monthStart, today);
+
+        // Get this quarter's average
+        int quarter = (today.getMonthValue() - 1) / 3;
+        LocalDate quarterStart = LocalDate.of(today.getYear(), quarter * 3 + 1, 1);
+        Double quarterlyAvgScore = dailyReportRepository.getAverageAiScore(userId, quarterStart, today);
+
+        return ResponseEntity.ok(Map.of(
+            "weeklyReportsSubmitted", weeklyCount,
+            "weeklyTargetDays", 5, // Mon-Fri
+            "weeklyAverageScore", weeklyAvgScore != null ? weeklyAvgScore : 0,
+            "monthlyAverageScore", monthlyAvgScore != null ? monthlyAvgScore : 0,
+            "quarterlyAverageScore", quarterlyAvgScore != null ? quarterlyAvgScore : 0,
+            "hasSubmittedToday", dailyReportRepository.existsByEmployeeIdAndReportDate(userId, today)
+        ));
+    }
+
+    // ==================== TEAM LEAD VIEWS ====================
+
+    @Operation(summary = "Get team's daily reports (Team Lead)")
+    @GetMapping("/team")
+    public ResponseEntity<?> getTeamReports(
+            Authentication auth,
+            @RequestParam(required = false) String date,
+            @RequestParam(required = false) Integer days
+    ) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        // Verify user is a team lead
+        Optional<Profile> profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty() || !Boolean.TRUE.equals(profileOpt.get().getIsTeamLead())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Only team leads can view team reports"));
+        }
+
+        String department = profileOpt.get().getDepartment();
+        if (department == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No department assigned"));
+        }
+
+        LocalDate endDate = date != null ? LocalDate.parse(date) : LocalDate.now();
+        LocalDate startDate = days != null ? endDate.minusDays(days) : endDate;
+
+        List<DailyReport> reports = dailyReportRepository.findByDepartmentAndDateRange(department, startDate, endDate);
+
+        // Group by employee
+        Map<UUID, List<Map<String, Object>>> byEmployee = new LinkedHashMap<>();
+        for (DailyReport r : reports) {
+            byEmployee.computeIfAbsent(r.getEmployeeId(), k -> new ArrayList<>()).add(toDto(r));
+        }
+
+        // Add employee info
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<UUID, List<Map<String, Object>>> entry : byEmployee.entrySet()) {
+            Profile emp = profileRepository.findById(entry.getKey()).orElse(null);
+            Map<String, Object> item = new HashMap<>();
+            item.put("employeeId", entry.getKey());
+            item.put("employeeName", emp != null ? emp.getFullName() : "Unknown");
+            item.put("reports", entry.getValue());
+            result.add(item);
+        }
+
+        return ResponseEntity.ok(result);
+    }
+
+    @Operation(summary = "Review a daily report (Team Lead)")
+    @PostMapping("/{id}/review")
+    public ResponseEntity<?> reviewReport(
+            Authentication auth,
+            @PathVariable Long id,
+            @RequestBody ReviewReportRequest request
+    ) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        // Verify team lead
+        Optional<Profile> profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty() || !Boolean.TRUE.equals(profileOpt.get().getIsTeamLead())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Only team leads can review reports"));
+        }
+
+        Optional<DailyReport> reportOpt = dailyReportRepository.findById(id);
+        if (reportOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Report not found"));
+        }
+
+        DailyReport report = reportOpt.get();
+        report.setReviewedBy(userId);
+        report.setReviewedAt(OffsetDateTime.now());
+        report.setReviewerNotes(request.notes());
+        if (request.score() != null) {
+            report.setReviewerScore(BigDecimal.valueOf(request.score()));
+        }
+        report.setStatus("reviewed");
+
+        report = dailyReportRepository.save(report);
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Report reviewed",
+            "report", toDto(report)
+        ));
+    }
+
+    @Operation(summary = "Get team daily report stats (Team Lead)")
+    @GetMapping("/team/stats")
+    public ResponseEntity<?> getTeamStats(
+            Authentication auth,
+            @RequestParam(required = false) String date
+    ) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        // Verify team lead
+        Optional<Profile> profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty() || !Boolean.TRUE.equals(profileOpt.get().getIsTeamLead())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Only team leads can view team stats"));
+        }
+
+        String department = profileOpt.get().getDepartment();
+        if (department == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No department assigned"));
+        }
+
+        LocalDate targetDate = date != null ? LocalDate.parse(date) : LocalDate.now();
+
+        // Get all team members
+        List<Profile> teamMembers = profileRepository.findByDepartmentAndStatus(department, "active");
+
+        // Get reports for target date
+        List<DailyReport> reports = dailyReportRepository.findByDepartmentAndDate(department, targetDate);
+        Map<UUID, DailyReport> reportsByEmployee = reports.stream()
+            .collect(Collectors.toMap(DailyReport::getEmployeeId, r -> r));
+
+        // Calculate stats
+        int totalMembers = teamMembers.size();
+        int submittedCount = reportsByEmployee.size();
+        int pendingCount = totalMembers - submittedCount;
+
+        Double avgScore = reports.stream()
+            .filter(r -> r.getAiScore() != null)
+            .mapToDouble(r -> r.getAiScore().doubleValue())
+            .average()
+            .orElse(0);
+
+        // Build member list
+        List<Map<String, Object>> membersList = new ArrayList<>();
+        for (Profile member : teamMembers) {
+            if (member.getId().equals(userId)) continue; // Skip team lead themselves
+
+            Map<String, Object> memberData = new HashMap<>();
+            memberData.put("employeeId", member.getId());
+            memberData.put("employeeName", member.getFullName());
+
+            DailyReport report = reportsByEmployee.get(member.getId());
+            memberData.put("hasSubmitted", report != null);
+            memberData.put("aiScore", report != null ? report.getAiScore() : null);
+            memberData.put("status", report != null ? report.getStatus() : null);
+
+            membersList.add(memberData);
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "date", targetDate.toString(),
+            "totalMembers", totalMembers - 1, // Exclude team lead
+            "submittedCount", submittedCount,
+            "pendingCount", pendingCount,
+            "averageAiScore", avgScore,
+            "members", membersList
+        ));
+    }
+
+    // ==================== HELPER METHODS ====================
+
+    private void gradeReportWithAi(DailyReport report, UUID employeeId) {
+        Profile employee = profileRepository.findById(employeeId).orElse(null);
+        String department = employee != null ? employee.getDepartment() : null;
+        String employeeName = employee != null ? employee.getFullName() : null;
+
+        // Get employee's individual KPIs for context
+        String quarter = getCurrentQuarter();
+        int year = LocalDate.now().getYear();
+        List<IndividualKpi> kpis = individualKpiRepository.findActiveByEmployeeAndPeriod(employeeId, quarter, year);
+
+        // Build KPI names for context
+        List<String> kpiNames = new ArrayList<>();
+        for (IndividualKpi kpi : kpis) {
+            kpiNames.add(kpi.getName() + " (Target: " + kpi.getTargetValue() + " " + 
+                (kpi.getTargetUnit() != null ? kpi.getTargetUnit() : "") + 
+                ", Weight: " + kpi.getWeight() + "%)");
+        }
+
+        try {
+            // Use the new grading method
+            GeminiAiService.DailyReportGradingResult result = aiService.gradeDailyReport(
+                employeeName,
+                department,
+                report.getTasksCompleted(),
+                report.getTasksInProgress(),
+                report.getBlockers(),
+                report.getPlannedForTomorrow(),
+                report.getAdditionalNotes(),
+                kpiNames
+            );
+
+            // Update report with AI results
+            if (result.overallScore != null) {
+                report.setAiScore(result.overallScore);
+            }
+            if (result.feedback != null) {
+                report.setAiFeedback(result.feedback);
+            }
+            if (result.kpiAlignmentScore != null) {
+                report.setKpiAlignmentScore(result.kpiAlignmentScore);
+            }
+            if (result.suggestionsForTomorrow != null && !result.suggestionsForTomorrow.isEmpty()) {
+                // Store suggestions as JSON array string
+                try {
+                    String suggestionsJson = objectMapper.writeValueAsString(result.suggestionsForTomorrow);
+                    report.setAiSuggestions(suggestionsJson);
+                } catch (Exception jsonEx) {
+                    System.err.println("Error serializing suggestions: " + jsonEx.getMessage());
+                }
+            }
+
+            report.setAiGradedAt(OffsetDateTime.now());
+            dailyReportRepository.save(report);
+
+        } catch (Exception e) {
+            System.err.println("AI grading error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private String getCurrentQuarter() {
+        int month = LocalDate.now().getMonthValue();
+        if (month <= 3) return "Q1";
+        if (month <= 6) return "Q2";
+        if (month <= 9) return "Q3";
+        return "Q4";
+    }
+
+    private Map<String, Object> toDto(DailyReport r) {
+        Map<String, Object> dto = new LinkedHashMap<>();
+        dto.put("id", r.getId());
+        dto.put("employeeId", r.getEmployeeId());
+        dto.put("reportDate", r.getReportDate().toString());
+        dto.put("tasksCompleted", r.getTasksCompleted());
+        dto.put("tasksInProgress", r.getTasksInProgress());
+        dto.put("blockers", r.getBlockers());
+        dto.put("plannedForTomorrow", r.getPlannedForTomorrow());
+        dto.put("additionalNotes", r.getAdditionalNotes());
+        dto.put("attachmentUrl", r.getAttachmentUrl());
+        dto.put("attachmentName", r.getAttachmentName());
+        dto.put("aiScore", r.getAiScore());
+        dto.put("aiFeedback", r.getAiFeedback());
+        dto.put("aiGradedAt", r.getAiGradedAt());
+        dto.put("kpiAlignmentScore", r.getKpiAlignmentScore());
+        dto.put("status", r.getStatus());
+        dto.put("reviewedBy", r.getReviewedBy());
+        dto.put("reviewedAt", r.getReviewedAt());
+        dto.put("reviewerNotes", r.getReviewerNotes());
+        dto.put("reviewerScore", r.getReviewerScore());
+        dto.put("finalScore", r.getFinalScore());
+        dto.put("createdAt", r.getCreatedAt());
+        return dto;
+    }
+
+    // Request DTOs
+    public record SubmitReportRequest(
+        LocalDate reportDate,
+        String tasksCompleted,
+        String tasksInProgress,
+        String blockers,
+        String plannedForTomorrow,
+        String additionalNotes,
+        String attachmentUrl,
+        String attachmentName
+    ) {}
+
+    public record ReviewReportRequest(
+        String notes,
+        Double score
+    ) {}
+}

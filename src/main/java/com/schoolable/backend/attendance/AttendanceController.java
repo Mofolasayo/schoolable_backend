@@ -272,6 +272,98 @@ public class AttendanceController {
         return ResponseEntity.ok(buildAttendanceResponse(attendance));
     }
 
+    // ==================== FACE REFERENCE ====================
+
+    @Operation(summary = "Get current user's reference face")
+    @GetMapping("/reference-face")
+    public ResponseEntity<?> getReferenceFace(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        Optional<Profile> profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "User not found"));
+        }
+
+        Profile profile = profileOpt.get();
+        Map<String, Object> response = new HashMap<>();
+        response.put("has_reference", profile.getReferenceFaceUrl() != null);
+        response.put("reference_url", profile.getReferenceFaceUrl());
+        response.put("registered_at", profile.getReferenceFaceRegisteredAt());
+        
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Register reference face")
+    @PostMapping("/reference-face")
+    public ResponseEntity<?> registerReferenceFace(@RequestBody Map<String, String> payload, Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal(); // Correctly cast to UUID since security config uses UUID
+        String faceUrl = payload.get("photo_url");
+        
+        if (faceUrl == null || faceUrl.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "photo_url is required"));
+        }
+
+        Optional<Profile> profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "User not found"));
+        }
+
+        Profile profile = profileOpt.get();
+        profile.setReferenceFaceUrl(faceUrl);
+        profile.setReferenceFaceRegisteredAt(OffsetDateTime.now());
+        profileRepository.save(profile);
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Reference face registered successfully",
+            "reference_url", faceUrl
+        ));
+    }
+
+    @Operation(summary = "Compare face (Mock implementation)")
+    @PostMapping("/compare-faces")
+    public ResponseEntity<?> compareFaces(@RequestBody Map<String, String> payload, Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        String currentFaceUrl = payload.get("face_url");
+        
+        if (currentFaceUrl == null || currentFaceUrl.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "face_url is required"));
+        }
+
+        Optional<Profile> profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "User not found"));
+        }
+
+        Profile profile = profileOpt.get();
+        if (profile.getReferenceFaceUrl() == null) {
+             return ResponseEntity.badRequest().body(Map.of(
+                 "error", "No reference face found. Please register a face first.",
+                 "code", "NO_REFERENCE_FACE"
+             ));
+        }
+
+        // MOCK: Always return success with random high confidence
+        // In production, this would call AWS Rekognition or similar
+        double confidence = 95.0 + (new Random().nextDouble() * 4.9);
+        boolean isMatch = true;
+
+        return ResponseEntity.ok(Map.of(
+            "match", isMatch,
+            "confidence", confidence,
+            "verified", isMatch && confidence > 85.0
+        ));
+    }
+
     // ==================== OFFICE LOCATIONS ====================
 
     @Operation(summary = "Get all office locations")

@@ -67,6 +67,266 @@ public class GeminiAiService {
     }
 
     /**
+     * Grade a daily report and provide feedback
+     * Used for the "Technical Competence" pillar scoring
+     */
+    public DailyReportGradingResult gradeDailyReport(
+            String employeeName,
+            String department,
+            String tasksCompleted,
+            String tasksInProgress,
+            String blockers,
+            String plannedForTomorrow,
+            String additionalNotes,
+            List<String> individualKpis) {
+
+        String prompt = buildDailyReportGradingPrompt(
+                employeeName, department, tasksCompleted, tasksInProgress,
+                blockers, plannedForTomorrow, additionalNotes, individualKpis);
+        
+        String aiResponse = callGeminiApi(prompt);
+        return parseDailyReportGradingResponse(aiResponse);
+    }
+
+    /**
+     * Build prompt for grading daily report
+     * AI now provides suggestions instead of scoring planning
+     */
+    private String buildDailyReportGradingPrompt(
+            String employeeName,
+            String department,
+            String tasksCompleted,
+            String tasksInProgress,
+            String blockers,
+            String plannedForTomorrow,
+            String additionalNotes,
+            List<String> individualKpis) {
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are a performance evaluation AI for a corporate workplace management system. ");
+        sb.append("Grade the following daily work report, provide constructive feedback, ");
+        sb.append("and suggest priorities for tomorrow based on the employee's KPIs.\n\n");
+        
+        sb.append("EMPLOYEE: ").append(employeeName != null ? employeeName : "Team Member");
+        sb.append(" (").append(department != null ? department : "General").append(" department)\n\n");
+        
+        sb.append("=== DAILY REPORT ===\n\n");
+        
+        sb.append("TASKS COMPLETED TODAY:\n");
+        sb.append(tasksCompleted != null ? tasksCompleted : "Not provided").append("\n\n");
+        
+        if (tasksInProgress != null && !tasksInProgress.isEmpty()) {
+            sb.append("TASKS IN PROGRESS:\n");
+            sb.append(tasksInProgress).append("\n\n");
+        }
+        
+        if (blockers != null && !blockers.isEmpty()) {
+            sb.append("BLOCKERS/CHALLENGES:\n");
+            sb.append(blockers).append("\n\n");
+        }
+        
+        if (plannedForTomorrow != null && !plannedForTomorrow.isEmpty()) {
+            sb.append("EMPLOYEE'S PLAN FOR TOMORROW:\n");
+            sb.append(plannedForTomorrow).append("\n\n");
+        }
+        
+        if (additionalNotes != null && !additionalNotes.isEmpty()) {
+            sb.append("ADDITIONAL NOTES:\n");
+            sb.append(additionalNotes).append("\n\n");
+        }
+        
+        if (individualKpis != null && !individualKpis.isEmpty()) {
+            sb.append("=== INDIVIDUAL KPIS (Key Performance Indicators) ===\n");
+            sb.append("These are the employee's specific goals for this quarter:\n");
+            for (String kpi : individualKpis) {
+                sb.append("• ").append(kpi).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        sb.append("=== YOUR TASK ===\n");
+        sb.append("1. GRADE the report from 0-100 based on:\n");
+        sb.append("   - CLARITY (30%): Clear, well-written, easy to understand\n");
+        sb.append("   - PRODUCTIVITY (40%): Meaningful work completed with tangible outcomes\n");
+        sb.append("   - KPI ALIGNMENT (30%): Tasks directly contribute to their KPIs\n\n");
+        
+        sb.append("2. PROVIDE constructive feedback (2-3 sentences)\n\n");
+        
+        sb.append("3. SUGGEST 3-4 specific priorities for tomorrow that:\n");
+        sb.append("   - Address any blockers mentioned\n");
+        sb.append("   - Advance in-progress tasks\n");
+        sb.append("   - Align with their KPIs\n");
+        sb.append("   - Are actionable and specific\n\n");
+
+        sb.append("RESPOND IN THIS EXACT JSON FORMAT (no markdown, no code blocks):\n");
+        sb.append("{\n");
+        sb.append("  \"overallScore\": <0-100>,\n");
+        sb.append("  \"clarityScore\": <0-100>,\n");
+        sb.append("  \"productivityScore\": <0-100>,\n");
+        sb.append("  \"kpiAlignmentScore\": <0-100>,\n");
+        sb.append("  \"feedback\": \"<2-3 sentences of constructive feedback>\",\n");
+        sb.append("  \"strengths\": [\"<strength 1>\", \"<strength 2>\"],\n");
+        sb.append("  \"improvements\": [\"<area for improvement>\"],\n");
+        sb.append("  \"suggestionsForTomorrow\": [\"<priority 1>\", \"<priority 2>\", \"<priority 3>\"]\n");
+        sb.append("}\n");
+
+        return sb.toString();
+    }
+
+    /**
+     * Parse daily report grading response
+     */
+    private DailyReportGradingResult parseDailyReportGradingResponse(String aiResponse) {
+        DailyReportGradingResult result = new DailyReportGradingResult();
+
+        if (aiResponse == null || aiResponse.isEmpty()) {
+            // Default response if AI fails
+            result.overallScore = BigDecimal.valueOf(70);
+            result.clarityScore = BigDecimal.valueOf(70);
+            result.productivityScore = BigDecimal.valueOf(70);
+            result.kpiAlignmentScore = BigDecimal.valueOf(70);
+            result.feedback = "Report received. Please ensure your reports include specific details about completed tasks.";
+            result.strengths = List.of("Report submitted on time");
+            result.improvements = List.of("Include more specific details about task completion");
+            result.suggestionsForTomorrow = List.of("Continue current tasks", "Address any pending blockers");
+            return result;
+        }
+
+        try {
+            // Clean the response
+            String cleanResponse = aiResponse.trim();
+            if (cleanResponse.startsWith("```json")) {
+                cleanResponse = cleanResponse.substring(7);
+            }
+            if (cleanResponse.startsWith("```")) {
+                cleanResponse = cleanResponse.substring(3);
+            }
+            if (cleanResponse.endsWith("```")) {
+                cleanResponse = cleanResponse.substring(0, cleanResponse.length() - 3);
+            }
+            cleanResponse = cleanResponse.trim();
+
+            JsonNode json = objectMapper.readTree(cleanResponse);
+
+            result.overallScore = BigDecimal.valueOf(json.path("overallScore").asDouble(70));
+            result.clarityScore = BigDecimal.valueOf(json.path("clarityScore").asDouble(70));
+            result.productivityScore = BigDecimal.valueOf(json.path("productivityScore").asDouble(70));
+            result.kpiAlignmentScore = BigDecimal.valueOf(json.path("kpiAlignmentScore").asDouble(70));
+            result.feedback = json.path("feedback").asText("Report received.");
+            result.strengths = jsonArrayToList(json.path("strengths"));
+            result.improvements = jsonArrayToList(json.path("improvements"));
+            result.suggestionsForTomorrow = jsonArrayToList(json.path("suggestionsForTomorrow"));
+
+        } catch (Exception e) {
+            System.err.println("Error parsing daily report grading response: " + e.getMessage());
+            result.overallScore = BigDecimal.valueOf(70);
+            result.feedback = "Report received. AI grading temporarily unavailable.";
+            result.strengths = List.of();
+            result.improvements = List.of();
+            result.suggestionsForTomorrow = List.of("Review your individual KPIs", "Focus on high-priority tasks");
+        }
+
+        return result;
+    }
+
+    /**
+     * Analyze weekly KPI progress with team member feedback for personalized insights
+     */
+    public AiAnalysisResult analyzeWeeklyProgressWithFeedback(
+            String teamName,
+            String department,
+            List<KpiProgressData> kpiData,
+            List<TeamMemberFeedback> memberFeedback,
+            int weekNumber,
+            int year) {
+
+        String prompt = buildEnhancedWeeklyAnalysisPrompt(teamName, department, kpiData, memberFeedback, weekNumber, year);
+        String aiResponse = callGeminiApi(prompt);
+        
+        return parseAiResponse(aiResponse, kpiData);
+    }
+
+    /**
+     * Build enhanced weekly analysis prompt with team member feedback context
+     */
+    private String buildEnhancedWeeklyAnalysisPrompt(
+            String teamName,
+            String department,
+            List<KpiProgressData> kpiData,
+            List<TeamMemberFeedback> memberFeedback,
+            int weekNumber,
+            int year) {
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are a performance analysis AI for a corporate team management system. ");
+        sb.append("You have access to both KPI metrics AND individual team member feedback data. ");
+        sb.append("Provide personalized, actionable insights that reference specific employees and their performance.\n\n");
+        sb.append("Team: ").append(teamName).append(" (").append(department).append(" department), ");
+        sb.append("Week ").append(weekNumber).append(" of ").append(year).append(".\n\n");
+
+        // KPI Progress Section
+        sb.append("=== TEAM KPI PROGRESS ===\n");
+        for (KpiProgressData kpi : kpiData) {
+            sb.append("• ").append(kpi.kpiName).append(": ");
+            sb.append(String.format("%.1f", kpi.progressPercentage)).append("% of target ");
+            sb.append("(").append(kpi.achievedValue).append("/").append(kpi.targetValue).append(" ").append(kpi.targetUnit).append("), ");
+            sb.append("Weight: ").append(kpi.weight).append("%\n");
+        }
+
+        // Team Member Feedback Section
+        if (!memberFeedback.isEmpty()) {
+            sb.append("\n=== INDIVIDUAL TEAM MEMBER PERFORMANCE ===\n");
+            for (TeamMemberFeedback member : memberFeedback) {
+                sb.append("\n📊 ").append(member.employeeName);
+                if (member.role != null) sb.append(" (").append(member.role).append(")");
+                sb.append(" - Trend: ").append(member.trend.toUpperCase()).append("\n");
+                
+                // Scores (1-5 scale)
+                sb.append("  Scores: Technical=").append(member.technicalScore);
+                sb.append(", Behavioral=").append(member.behavioralScore);
+                sb.append(", Culture Fit=").append(member.cultureFitScore);
+                sb.append(", Growth=").append(member.growthScore).append("\n");
+                
+                // Highlights and areas for focus
+                if (member.highlights != null && !member.highlights.isEmpty()) {
+                    sb.append("  Highlights: ").append(member.highlights).append("\n");
+                }
+                if (member.areasForFocus != null && !member.areasForFocus.isEmpty()) {
+                    sb.append("  Areas for Focus: ").append(member.areasForFocus).append("\n");
+                }
+                if (member.technicalNotes != null && !member.technicalNotes.isEmpty()) {
+                    sb.append("  Technical Notes: ").append(member.technicalNotes).append("\n");
+                }
+            }
+        } else {
+            sb.append("\n(No individual member feedback data available for this week)\n");
+        }
+
+        sb.append("\n=== INSTRUCTIONS ===\n");
+        sb.append("1. Calculate a KPI score (0-100) based on weighted KPI progress\n");
+        sb.append("2. Provide a summary mentioning SPECIFIC employees by name\n");
+        sb.append("3. Identify top performers and those needing support BY NAME\n");
+        sb.append("4. Give personalized coaching recommendations for specific team members\n");
+        sb.append("5. Flag any risk alerts about declining trends or consistently low scores\n\n");
+
+        sb.append("RESPOND IN THIS EXACT JSON FORMAT (no markdown):\n");
+        sb.append("{\n");
+        sb.append("  \"kpiScore\": <calculated weighted score 0-100>,\n");
+        sb.append("  \"summary\": \"<2-3 sentence summary mentioning key employees>\",\n");
+        sb.append("  \"topPerforming\": [\"<Employee name - reason>\", \"<Employee name - reason>\"],\n");
+        sb.append("  \"needsAttention\": [\"<Employee name - specific issue to address>\"],\n");
+        sb.append("  \"recommendations\": [\n");
+        sb.append("    \"<Specific recommendation for named employee or team>\",\n");
+        sb.append("    \"<Another specific actionable recommendation>\"\n");
+        sb.append("  ],\n");
+        sb.append("  \"riskAlerts\": [\"<Any declining trends or critical concerns with employee names>\"]\n");
+        sb.append("}\n");
+
+        return sb.toString();
+    }
+
+
+    /**
      * Build the weekly analysis prompt
      */
     private String buildWeeklyAnalysisPrompt(
@@ -395,5 +655,41 @@ public class GeminiAiService {
         public Map<String, Object> recommendations;
         public Map<String, Object> riskAlerts;
         public Map<String, Object> rawResponse;
+    }
+
+    /**
+     * Team member feedback data for personalized AI insights
+     */
+    public static class TeamMemberFeedback {
+        public String employeeName;
+        public String role;
+        public Integer technicalScore;
+        public Integer behavioralScore;
+        public Integer cultureFitScore;
+        public Integer growthScore;
+        public String highlights;
+        public String areasForFocus;
+        public String technicalNotes;
+        public String behavioralNotes;
+        public String trend; // "improving", "declining", "stable", "new"
+        
+        public TeamMemberFeedback() {}
+    }
+
+    /**
+     * Result from daily report grading
+     * AI provides score breakdown and actionable suggestions
+     */
+    public static class DailyReportGradingResult {
+        public BigDecimal overallScore;
+        public BigDecimal clarityScore;
+        public BigDecimal productivityScore;
+        public BigDecimal kpiAlignmentScore;
+        public String feedback;
+        public List<String> strengths;
+        public List<String> improvements;
+        public List<String> suggestionsForTomorrow; // AI-generated priorities
+
+        public DailyReportGradingResult() {}
     }
 }
