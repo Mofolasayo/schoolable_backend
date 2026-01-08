@@ -1,5 +1,6 @@
 package com.schoolable.backend.notifications;
 
+import com.schoolable.backend.notification.NotificationService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -26,6 +27,9 @@ public class SmartRemindersController {
 
     @Autowired
     private SmartReminderRepository reminderRepository;
+
+    @Autowired
+    private NotificationService notificationService;
 
     // ==================== GET ALL REMINDERS ====================
 
@@ -204,17 +208,65 @@ public class SmartRemindersController {
 
         SmartReminder reminder = optReminder.get();
         
-        // TODO: Actually trigger the notification here
-        // For now, just update trigger count and last triggered
+        // Get targeted users based on targetAudience
+        List<UUID> targetUserIds = getTargetUserIds(reminder.getTargetAudience());
+        
+        if (!targetUserIds.isEmpty()) {
+            // Send notifications to all targeted users
+            String title = "📢 " + reminder.getName();
+            String body = reminder.getMessage();
+            
+            Map<String, Object> data = new HashMap<>();
+            data.put("action", "open_announcement");
+            data.put("reminderId", reminder.getId());
+            data.put("type", "smart_reminder");
+            
+            for (UUID userId : targetUserIds) {
+                notificationService.sendToUser(userId, title, body, "SMART_REMINDER", reminder.getId().toString(), data);
+            }
+        }
+        
+        // Update trigger count and last triggered
         reminder.setTriggerCount(reminder.getTriggerCount() + 1);
         reminder.setLastTriggered(OffsetDateTime.now());
         reminder = reminderRepository.save(reminder);
 
         return ResponseEntity.ok(Map.of(
             "success", true,
-            "message", "Reminder triggered successfully",
+            "message", "Reminder triggered and sent to " + targetUserIds.size() + " users",
+            "usersNotified", targetUserIds.size(),
             "reminder", buildReminderResponse(reminder)
         ));
+    }
+    
+    /**
+     * Get target user IDs based on targetAudience setting.
+     */
+    private List<UUID> getTargetUserIds(String targetAudience) {
+        List<UUID> userIds = new ArrayList<>();
+        
+        if (targetAudience == null || targetAudience.isEmpty() || "all".equalsIgnoreCase(targetAudience)) {
+            // All active employees
+            profileRepository.findByStatus("active").forEach(p -> userIds.add(p.getId()));
+        } else if (targetAudience.startsWith("department:")) {
+            // Specific department
+            String department = targetAudience.substring("department:".length());
+            profileRepository.findByDepartment(department).forEach(p -> userIds.add(p.getId()));
+        } else if ("team_leads".equalsIgnoreCase(targetAudience)) {
+            // Only team leads
+            profileRepository.findByIsTeamLeadTrue().forEach(p -> userIds.add(p.getId()));
+        } else if (targetAudience.contains(",")) {
+            // Comma-separated list of user IDs
+            for (String idStr : targetAudience.split(",")) {
+                try {
+                    userIds.add(UUID.fromString(idStr.trim()));
+                } catch (Exception e) {
+                    // Skip invalid UUIDs
+                }
+            }
+        }
+        
+        return userIds;
     }
 
     // ==================== HELPER METHODS ====================
