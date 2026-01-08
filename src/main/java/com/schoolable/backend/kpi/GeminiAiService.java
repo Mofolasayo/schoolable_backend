@@ -80,12 +80,92 @@ public class GeminiAiService {
             String additionalNotes,
             List<String> individualKpis) {
 
+        // Pre-check for empty/insufficient content - assign low score automatically
+        DailyReportGradingResult preCheckResult = preValidateReportContent(
+            tasksCompleted, tasksInProgress, blockers, plannedForTomorrow
+        );
+        if (preCheckResult != null) {
+            return preCheckResult;
+        }
+
         String prompt = buildDailyReportGradingPrompt(
                 employeeName, department, tasksCompleted, tasksInProgress,
                 blockers, plannedForTomorrow, additionalNotes, individualKpis);
         
         String aiResponse = callGeminiApi(prompt);
         return parseDailyReportGradingResponse(aiResponse);
+    }
+
+    /**
+     * Pre-validate report content before calling AI
+     * Returns a low-scored result if content is clearly insufficient
+     */
+    private DailyReportGradingResult preValidateReportContent(
+            String tasksCompleted, String tasksInProgress, 
+            String blockers, String plannedForTomorrow) {
+        
+        // Check if tasksCompleted is essentially empty or has placeholder text
+        boolean isTasksEmpty = tasksCompleted == null || 
+            tasksCompleted.trim().isEmpty() ||
+            tasksCompleted.trim().equalsIgnoreCase("nothing") ||
+            tasksCompleted.trim().equalsIgnoreCase("none") ||
+            tasksCompleted.trim().equalsIgnoreCase("n/a") ||
+            tasksCompleted.trim().equalsIgnoreCase("nil") ||
+            tasksCompleted.trim().length() < 10;
+
+        // Check overall content quality
+        int totalContentLength = 0;
+        if (tasksCompleted != null) totalContentLength += tasksCompleted.trim().length();
+        if (tasksInProgress != null) totalContentLength += tasksInProgress.trim().length();
+        if (plannedForTomorrow != null) totalContentLength += plannedForTomorrow.trim().length();
+
+        // Very poor report - barely any content
+        if (isTasksEmpty || totalContentLength < 30) {
+            DailyReportGradingResult result = new DailyReportGradingResult();
+            result.overallScore = BigDecimal.valueOf(25);
+            result.clarityScore = BigDecimal.valueOf(20);
+            result.productivityScore = BigDecimal.valueOf(20);
+            result.kpiAlignmentScore = BigDecimal.valueOf(30);
+            result.feedback = "This report lacks sufficient detail. Daily reports should describe specific tasks completed with tangible outcomes. Empty or placeholder responses are not acceptable.";
+            result.strengths = List.of("Report was submitted");
+            result.improvements = List.of(
+                "Describe specific tasks you worked on",
+                "Include measurable outcomes and progress",
+                "Document challenges and how you addressed them"
+            );
+            result.suggestionsForTomorrow = List.of(
+                "Document your work in detail throughout the day",
+                "Note specific accomplishments with metrics where possible"
+            );
+            return result;
+        }
+
+        // Check for reports with all blockers but no work
+        boolean hasOnlyBlockers = (tasksCompleted == null || tasksCompleted.trim().length() < 20) &&
+            (tasksInProgress == null || tasksInProgress.trim().length() < 10) &&
+            (blockers != null && blockers.trim().length() > 20);
+
+        if (hasOnlyBlockers) {
+            DailyReportGradingResult result = new DailyReportGradingResult();
+            result.overallScore = BigDecimal.valueOf(35);
+            result.clarityScore = BigDecimal.valueOf(50);
+            result.productivityScore = BigDecimal.valueOf(20);
+            result.kpiAlignmentScore = BigDecimal.valueOf(30);
+            result.feedback = "While blockers are documented, there should be some work completed or progress made even on challenging days. Consider what tasks you could have advanced despite the obstacles.";
+            result.strengths = List.of("Blockers are documented");
+            result.improvements = List.of(
+                "Work on tasks that don't depend on the blockers",
+                "Proactively seek help to resolve blockers faster",
+                "Document any partial progress made"
+            );
+            result.suggestionsForTomorrow = List.of(
+                "Escalate blockers early in the day",
+                "Have backup tasks ready when blocked"
+            );
+            return result;
+        }
+
+        return null; // Content passes pre-validation, proceed with AI grading
     }
 
     /**
@@ -180,15 +260,15 @@ public class GeminiAiService {
         DailyReportGradingResult result = new DailyReportGradingResult();
 
         if (aiResponse == null || aiResponse.isEmpty()) {
-            // Default response if AI fails
-            result.overallScore = BigDecimal.valueOf(70);
-            result.clarityScore = BigDecimal.valueOf(70);
-            result.productivityScore = BigDecimal.valueOf(70);
-            result.kpiAlignmentScore = BigDecimal.valueOf(70);
-            result.feedback = "Report received. Please ensure your reports include specific details about completed tasks.";
-            result.strengths = List.of("Report submitted on time");
-            result.improvements = List.of("Include more specific details about task completion");
-            result.suggestionsForTomorrow = List.of("Continue current tasks", "Address any pending blockers");
+            // Default to low score if AI fails - report should still be graded properly
+            result.overallScore = BigDecimal.valueOf(40);
+            result.clarityScore = BigDecimal.valueOf(40);
+            result.productivityScore = BigDecimal.valueOf(40);
+            result.kpiAlignmentScore = BigDecimal.valueOf(40);
+            result.feedback = "Report received but could not be analyzed. Please include specific details about completed tasks.";
+            result.strengths = List.of("Report was submitted");
+            result.improvements = List.of("Include specific task details", "Describe tangible outcomes");
+            result.suggestionsForTomorrow = List.of("Document work more thoroughly", "Include measurable progress");
             return result;
         }
 
