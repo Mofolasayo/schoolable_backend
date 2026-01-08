@@ -177,9 +177,10 @@ public class TeamLeadController {
             boolean weeklyReportsComplete = reportsSubmittedThisWeek >= reportsRequired && reportsRequired > 0;
             
             // Calculate average team Aura score (0-100 scale percentage)
+            // Include ALL department members including team lead for Aura calculation
             double totalAura = 0;
             int membersWithAura = 0;
-            for (Profile member : teamMembers) {
+            for (Profile member : allDepartmentMembers) {
                 try {
                     EmployeeAuraResponse auraData = auraDashboardService.getEmployeeAuraDashboard(member.getId());
                     if (auraData != null && auraData.getAuraScore() != null) {
