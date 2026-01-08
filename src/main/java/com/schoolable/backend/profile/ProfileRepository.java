@@ -45,6 +45,9 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     // Active employees for Aura calculation
     List<Profile> findByStatusAndProfileCompletedAtIsNotNull(String status);
     
+    // Find by status only
+    List<Profile> findByStatus(String status);
+    
     // Find by department and status
     List<Profile> findByDepartmentAndStatus(String department, String status);
 }
