@@ -98,7 +98,8 @@ public class GeminiAiService {
 
     /**
      * Pre-validate report content before calling AI
-     * Returns a low-scored result if content is clearly insufficient
+     * Returns a zero/very low score if content is clearly insufficient
+     * Empty reports are REJECTED with 0% score
      */
     private DailyReportGradingResult preValidateReportContent(
             String tasksCompleted, String tasksInProgress, 
@@ -111,7 +112,9 @@ public class GeminiAiService {
             tasksCompleted.trim().equalsIgnoreCase("none") ||
             tasksCompleted.trim().equalsIgnoreCase("n/a") ||
             tasksCompleted.trim().equalsIgnoreCase("nil") ||
-            tasksCompleted.trim().length() < 10;
+            tasksCompleted.trim().equalsIgnoreCase("-") ||
+            tasksCompleted.trim().equalsIgnoreCase(".") ||
+            tasksCompleted.trim().length() < 15;
 
         // Check overall content quality
         int totalContentLength = 0;
@@ -119,23 +122,46 @@ public class GeminiAiService {
         if (tasksInProgress != null) totalContentLength += tasksInProgress.trim().length();
         if (plannedForTomorrow != null) totalContentLength += plannedForTomorrow.trim().length();
 
-        // Very poor report - barely any content
-        if (isTasksEmpty || totalContentLength < 30) {
+        // COMPLETELY EMPTY REPORT - REJECTED with 0%
+        if (totalContentLength < 10) {
             DailyReportGradingResult result = new DailyReportGradingResult();
-            result.overallScore = BigDecimal.valueOf(25);
-            result.clarityScore = BigDecimal.valueOf(20);
-            result.productivityScore = BigDecimal.valueOf(20);
-            result.kpiAlignmentScore = BigDecimal.valueOf(30);
-            result.feedback = "This report lacks sufficient detail. Daily reports should describe specific tasks completed with tangible outcomes. Empty or placeholder responses are not acceptable.";
-            result.strengths = List.of("Report was submitted");
+            result.overallScore = BigDecimal.ZERO;
+            result.clarityScore = BigDecimal.ZERO;
+            result.productivityScore = BigDecimal.ZERO;
+            result.kpiAlignmentScore = BigDecimal.ZERO;
+            result.feedback = "⚠️ REPORT REJECTED: This report is essentially empty. You must document the actual work you completed today. Empty reports are not acceptable and will significantly impact your Aura Score.";
+            result.strengths = List.of();
             result.improvements = List.of(
-                "Describe specific tasks you worked on",
-                "Include measurable outcomes and progress",
+                "Actually describe what work you did today",
+                "Include specific tasks, meetings, or activities",
+                "Document any progress made on your KPIs"
+            );
+            result.suggestionsForTomorrow = List.of(
+                "Keep notes throughout the day of what you work on",
+                "Set reminders to document tasks as you complete them",
+                "Review your calendar and task list before writing your report"
+            );
+            return result;
+        }
+
+        // Very poor report - barely any meaningful content
+        if (isTasksEmpty || totalContentLength < 40) {
+            DailyReportGradingResult result = new DailyReportGradingResult();
+            result.overallScore = BigDecimal.valueOf(10);
+            result.clarityScore = BigDecimal.valueOf(10);
+            result.productivityScore = BigDecimal.valueOf(10);
+            result.kpiAlignmentScore = BigDecimal.valueOf(15);
+            result.feedback = "⚠️ POOR REPORT: This report lacks sufficient detail. Daily reports should describe specific tasks completed with tangible outcomes. Vague or minimal responses will negatively impact your performance score.";
+            result.strengths = List.of("Report was submitted on time");
+            result.improvements = List.of(
+                "Describe specific tasks you worked on with details",
+                "Include measurable outcomes and progress percentages",
                 "Document challenges and how you addressed them"
             );
             result.suggestionsForTomorrow = List.of(
                 "Document your work in detail throughout the day",
-                "Note specific accomplishments with metrics where possible"
+                "Note specific accomplishments with metrics where possible",
+                "Include how your work aligns with your assigned KPIs"
             );
             return result;
         }
@@ -183,9 +209,9 @@ public class GeminiAiService {
             List<String> individualKpis) {
 
         StringBuilder sb = new StringBuilder();
-        sb.append("You are a performance evaluation AI for a corporate workplace management system. ");
+        sb.append("You are a strict but fair performance evaluation AI for a corporate workplace management system. ");
         sb.append("Grade the following daily work report, provide constructive feedback, ");
-        sb.append("and suggest priorities for tomorrow based on the employee's KPIs.\n\n");
+        sb.append("suggest priorities for tomorrow, and provide tips to boost their Aura Score.\n\n");
         
         sb.append("EMPLOYEE: ").append(employeeName != null ? employeeName : "Team Member");
         sb.append(" (").append(department != null ? department : "General").append(" department)\n\n");
@@ -224,19 +250,30 @@ public class GeminiAiService {
             sb.append("\n");
         }
 
+        sb.append("=== GRADING CRITERIA ===\n");
+        sb.append("BE STRICT. Do not give high scores for vague or minimal reports.\n");
+        sb.append("- Scores 80+: Excellent detail, clear outcomes, strong KPI alignment\n");
+        sb.append("- Scores 60-79: Good but could improve specificity\n");
+        sb.append("- Scores 40-59: Needs more detail and concrete outcomes\n");
+        sb.append("- Scores 0-39: Poor quality, vague, or insufficient content\n\n");
+        
         sb.append("=== YOUR TASK ===\n");
-        sb.append("1. GRADE the report from 0-100 based on:\n");
-        sb.append("   - CLARITY (30%): Clear, well-written, easy to understand\n");
-        sb.append("   - PRODUCTIVITY (40%): Meaningful work completed with tangible outcomes\n");
-        sb.append("   - KPI ALIGNMENT (30%): Tasks directly contribute to their KPIs\n\n");
+        sb.append("1. GRADE the report (be strict!) based on:\n");
+        sb.append("   - CLARITY (30%): Clear, well-written, specific details\n");
+        sb.append("   - PRODUCTIVITY (40%): Meaningful work with tangible, measurable outcomes\n");
+        sb.append("   - KPI ALIGNMENT (30%): Tasks directly contribute to their assigned KPIs\n\n");
         
         sb.append("2. PROVIDE constructive feedback (2-3 sentences)\n\n");
         
         sb.append("3. SUGGEST 3-4 specific priorities for tomorrow that:\n");
         sb.append("   - Address any blockers mentioned\n");
         sb.append("   - Advance in-progress tasks\n");
-        sb.append("   - Align with their KPIs\n");
+        sb.append("   - Directly help achieve their KPIs\n");
         sb.append("   - Are actionable and specific\n\n");
+        
+        sb.append("4. PROVIDE 2-3 tips to help boost their Aura Score:\n");
+        sb.append("   - Aura Score has 4 pillars: Technical (tasks), Behavioral (compliance), Cultural (attendance), Growth (training)\n");
+        sb.append("   - Focus on actionable tips based on their report content\n\n");
 
         sb.append("RESPOND IN THIS EXACT JSON FORMAT (no markdown, no code blocks):\n");
         sb.append("{\n");
@@ -247,7 +284,8 @@ public class GeminiAiService {
         sb.append("  \"feedback\": \"<2-3 sentences of constructive feedback>\",\n");
         sb.append("  \"strengths\": [\"<strength 1>\", \"<strength 2>\"],\n");
         sb.append("  \"improvements\": [\"<area for improvement>\"],\n");
-        sb.append("  \"suggestionsForTomorrow\": [\"<priority 1>\", \"<priority 2>\", \"<priority 3>\"]\n");
+        sb.append("  \"suggestionsForTomorrow\": [\"<specific priority 1>\", \"<specific priority 2>\", \"<specific priority 3>\"],\n");
+        sb.append("  \"auraBoostTips\": [\"<tip to boost aura score 1>\", \"<tip 2>\"]\n");
         sb.append("}\n");
 
         return sb.toString();
@@ -260,15 +298,16 @@ public class GeminiAiService {
         DailyReportGradingResult result = new DailyReportGradingResult();
 
         if (aiResponse == null || aiResponse.isEmpty()) {
-            // Default to low score if AI fails - report should still be graded properly
-            result.overallScore = BigDecimal.valueOf(40);
-            result.clarityScore = BigDecimal.valueOf(40);
-            result.productivityScore = BigDecimal.valueOf(40);
-            result.kpiAlignmentScore = BigDecimal.valueOf(40);
+            // Default to low score if AI fails - encourage better reports
+            result.overallScore = BigDecimal.valueOf(30);
+            result.clarityScore = BigDecimal.valueOf(30);
+            result.productivityScore = BigDecimal.valueOf(30);
+            result.kpiAlignmentScore = BigDecimal.valueOf(30);
             result.feedback = "Report received but could not be analyzed. Please include specific details about completed tasks.";
             result.strengths = List.of("Report was submitted");
             result.improvements = List.of("Include specific task details", "Describe tangible outcomes");
             result.suggestionsForTomorrow = List.of("Document work more thoroughly", "Include measurable progress");
+            result.auraBoostTips = List.of("Complete your daily report with detailed descriptions", "Check in on time to improve Cultural Fit pillar");
             return result;
         }
 
@@ -288,22 +327,32 @@ public class GeminiAiService {
 
             JsonNode json = objectMapper.readTree(cleanResponse);
 
-            result.overallScore = BigDecimal.valueOf(json.path("overallScore").asDouble(70));
-            result.clarityScore = BigDecimal.valueOf(json.path("clarityScore").asDouble(70));
-            result.productivityScore = BigDecimal.valueOf(json.path("productivityScore").asDouble(70));
-            result.kpiAlignmentScore = BigDecimal.valueOf(json.path("kpiAlignmentScore").asDouble(70));
+            result.overallScore = BigDecimal.valueOf(json.path("overallScore").asDouble(50));
+            result.clarityScore = BigDecimal.valueOf(json.path("clarityScore").asDouble(50));
+            result.productivityScore = BigDecimal.valueOf(json.path("productivityScore").asDouble(50));
+            result.kpiAlignmentScore = BigDecimal.valueOf(json.path("kpiAlignmentScore").asDouble(50));
             result.feedback = json.path("feedback").asText("Report received.");
             result.strengths = jsonArrayToList(json.path("strengths"));
             result.improvements = jsonArrayToList(json.path("improvements"));
             result.suggestionsForTomorrow = jsonArrayToList(json.path("suggestionsForTomorrow"));
+            result.auraBoostTips = jsonArrayToList(json.path("auraBoostTips"));
+            
+            // Fallback if auraBoostTips is empty
+            if (result.auraBoostTips == null || result.auraBoostTips.isEmpty()) {
+                result.auraBoostTips = List.of(
+                    "Complete tasks on time to boost your Technical Competence pillar",
+                    "Attend work consistently to improve your Cultural Fit score"
+                );
+            }
 
         } catch (Exception e) {
             System.err.println("Error parsing daily report grading response: " + e.getMessage());
-            result.overallScore = BigDecimal.valueOf(70);
+            result.overallScore = BigDecimal.valueOf(50);
             result.feedback = "Report received. AI grading temporarily unavailable.";
             result.strengths = List.of();
             result.improvements = List.of();
             result.suggestionsForTomorrow = List.of("Review your individual KPIs", "Focus on high-priority tasks");
+            result.auraBoostTips = List.of("Complete all assigned tasks this week", "Submit your daily reports on time");
         }
 
         return result;
@@ -768,7 +817,8 @@ public class GeminiAiService {
         public String feedback;
         public List<String> strengths;
         public List<String> improvements;
-        public List<String> suggestionsForTomorrow; // AI-generated priorities
+        public List<String> suggestionsForTomorrow; // AI-generated priorities for next day
+        public List<String> auraBoostTips; // Tips to boost Aura Score
 
         public DailyReportGradingResult() {}
     }
