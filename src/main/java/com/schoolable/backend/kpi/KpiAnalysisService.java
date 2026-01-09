@@ -260,6 +260,10 @@ public class KpiAnalysisService {
                 feedback.behavioralScore = report.getBehavioralScore();
                 feedback.cultureFitScore = report.getCultureFitScore();
                 feedback.growthScore = report.getGrowthLearningScore();
+                feedback.initiativeScore = report.getInitiativeScore();
+                feedback.attitudeScore = report.getAttitudeTowardsWorkScore();
+                feedback.teamworkScore = report.getTeamworkCollaborationScore();
+                feedback.teamReportDocument = report.getTeamReportUrl();
                 feedback.highlights = report.getWeeklyHighlights();
                 feedback.areasForFocus = report.getAreasForFocus();
                 feedback.technicalNotes = report.getTechnicalNotes();

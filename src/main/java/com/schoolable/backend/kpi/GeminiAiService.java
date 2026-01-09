@@ -314,16 +314,12 @@ public class GeminiAiService {
         try {
             // Clean the response
             String cleanResponse = aiResponse.trim();
-            if (cleanResponse.startsWith("```json")) {
-                cleanResponse = cleanResponse.substring(7);
+            // Robust JSON extraction
+            int firstOpen = cleanResponse.indexOf('{');
+            int lastClose = cleanResponse.lastIndexOf('}');
+            if (firstOpen != -1 && lastClose != -1 && lastClose > firstOpen) {
+                cleanResponse = cleanResponse.substring(firstOpen, lastClose + 1);
             }
-            if (cleanResponse.startsWith("```")) {
-                cleanResponse = cleanResponse.substring(3);
-            }
-            if (cleanResponse.endsWith("```")) {
-                cleanResponse = cleanResponse.substring(0, cleanResponse.length() - 3);
-            }
-            cleanResponse = cleanResponse.trim();
 
             JsonNode json = objectMapper.readTree(cleanResponse);
 
@@ -410,45 +406,53 @@ public class GeminiAiService {
                 if (member.role != null) sb.append(" (").append(member.role).append(")");
                 sb.append(" - Trend: ").append(member.trend.toUpperCase()).append("\n");
                 
-                // Scores (1-5 scale)
-                sb.append("  Scores: Technical=").append(member.technicalScore);
-                sb.append(", Behavioral=").append(member.behavioralScore);
-                sb.append(", Culture Fit=").append(member.cultureFitScore);
-                sb.append(", Growth=").append(member.growthScore).append("\n");
+                // Ratings (1-5 scale)
+                sb.append("  Team Lead Ratings: Initiative=").append(member.initiativeScore);
+                sb.append(", Attitude=").append(member.attitudeScore);
+                sb.append(", Teamwork=").append(member.teamworkScore);
+                sb.append(" (Scale 1-5)\n");
                 
-                // Highlights and areas for focus
+                sb.append("  Metric Pillars: Tech=").append(member.technicalScore);
+                sb.append(", Behavioral=").append(member.behavioralScore);
+                sb.append(", Culture=").append(member.cultureFitScore).append("\n");
+                
+                if (member.teamReportDocument != null && !member.teamReportDocument.isEmpty()) {
+                    sb.append("  [DOCUMENT UPLOADED]: ").append(member.teamReportDocument).append("\n");
+                    sb.append("  Wait for feedback specifically referencing the contents of this document.\n");
+                }
+
                 if (member.highlights != null && !member.highlights.isEmpty()) {
                     sb.append("  Highlights: ").append(member.highlights).append("\n");
                 }
                 if (member.areasForFocus != null && !member.areasForFocus.isEmpty()) {
                     sb.append("  Areas for Focus: ").append(member.areasForFocus).append("\n");
                 }
-                if (member.technicalNotes != null && !member.technicalNotes.isEmpty()) {
-                    sb.append("  Technical Notes: ").append(member.technicalNotes).append("\n");
-                }
             }
         } else {
-            sb.append("\n(No individual member feedback data available for this week)\n");
+            sb.append("\n(No individual member feedback data available for this week. Use KPI targets for baseline analysis.)\n");
         }
 
-        sb.append("\n=== INSTRUCTIONS ===\n");
-        sb.append("1. Calculate a KPI score (0-100) based on weighted KPI progress\n");
-        sb.append("2. Provide a summary mentioning SPECIFIC employees by name\n");
-        sb.append("3. Identify top performers and those needing support BY NAME\n");
-        sb.append("4. Give personalized coaching recommendations for specific team members\n");
-        sb.append("5. Flag any risk alerts about declining trends or consistently low scores\n\n");
+        sb.append("\n=== ADDITIONAL CONTEXT ===\n");
+        sb.append("- The Team Lead has uploaded supplementary documents (e.g., CVs or Work Plans). Explicitly mention these in your summary if relevant to the employee's growth or performance.\n");
+        sb.append("- Your goal is to provide HIGHLY DETAILED, STRATEGIC insights. Avoid generic phrases.\n\n");
 
-        sb.append("RESPOND IN THIS EXACT JSON FORMAT (no markdown):\n");
+        sb.append("=== INSTRUCTIONS ===\n");
+        sb.append("1. Calculate a KPI score (0-100) based on weighted KPI progress.\n");
+        sb.append("2. Provide a 3-4 sentence summary that sounds like a senior management consultant. Reference employees by name and link their soft skill ratings (Initiative/Teamwork) to their actual KPI results.\n");
+        sb.append("3. If an uploaded document (e.g., a CV) is mentioned for an employee, provide a personalized recommendation like 'Leverage the skills identified in [Document Name] to bridge the current gap in [Specific KPI]'.\n");
+        sb.append("4. TOP PERFORMING: List 2-3 specific achievements using metrics.\n");
+        sb.append("5. NEEDS ATTENTION: Focus on behavioral or technical blockers identified in the ratings.\n");
+        sb.append("6. RECOMMENDATIONS: Provide 3-4 actionable, high-impact strategies for next week.\n");
+        sb.append("7. RISK ALERTS: Identify any 'silent risks' like stable but low engagement scores.\n\n");
+
+        sb.append("RESPOND IN THIS EXACT JSON FORMAT (no markdown, no preamble):\n");
         sb.append("{\n");
-        sb.append("  \"kpiScore\": <calculated weighted score 0-100>,\n");
-        sb.append("  \"summary\": \"<2-3 sentence summary mentioning key employees>\",\n");
-        sb.append("  \"topPerforming\": [\"<Employee name - reason>\", \"<Employee name - reason>\"],\n");
-        sb.append("  \"needsAttention\": [\"<Employee name - specific issue to address>\"],\n");
-        sb.append("  \"recommendations\": [\n");
-        sb.append("    \"<Specific recommendation for named employee or team>\",\n");
-        sb.append("    \"<Another specific actionable recommendation>\"\n");
-        sb.append("  ],\n");
-        sb.append("  \"riskAlerts\": [\"<Any declining trends or critical concerns with employee names>\"]\n");
+        sb.append("  \"kpiScore\": <0-100>,\n");
+        sb.append("  \"summary\": \"<Detailed strategic summary>\",\n");
+        sb.append("  \"topPerforming\": [\"<Employee>: <Achievement>\"],\n");
+        sb.append("  \"needsAttention\": [\"<Employee>: <Root cause of issue>\"],\n");
+        sb.append("  \"recommendations\": [\"<Actionable step 1>\", \"<Step 2>\"],\n");
+        sb.append("  \"riskAlerts\": [\"<Risk alert 1>\"]\n");
         sb.append("}\n");
 
         return sb.toString();
@@ -634,17 +638,13 @@ public class GeminiAiService {
         try {
             // Clean the response (remove markdown if present)
             String cleanResponse = aiResponse.trim();
-            if (cleanResponse.startsWith("```json")) {
-                cleanResponse = cleanResponse.substring(7);
+            // Robust JSON extraction
+            int firstOpen = cleanResponse.indexOf('{');
+            int lastClose = cleanResponse.lastIndexOf('}');
+            if (firstOpen != -1 && lastClose != -1 && lastClose > firstOpen) {
+                cleanResponse = cleanResponse.substring(firstOpen, lastClose + 1);
             }
-            if (cleanResponse.startsWith("```")) {
-                cleanResponse = cleanResponse.substring(3);
-            }
-            if (cleanResponse.endsWith("```")) {
-                cleanResponse = cleanResponse.substring(0, cleanResponse.length() - 3);
-            }
-            cleanResponse = cleanResponse.trim();
-
+            
             JsonNode json = objectMapper.readTree(cleanResponse);
 
             // Extract kpiScore
@@ -796,6 +796,10 @@ public class GeminiAiService {
         public Integer behavioralScore;
         public Integer cultureFitScore;
         public Integer growthScore;
+        public Integer teamworkScore;
+        public Integer initiativeScore;
+        public Integer attitudeScore;
+        public String teamReportDocument;
         public String highlights;
         public String areasForFocus;
         public String technicalNotes;

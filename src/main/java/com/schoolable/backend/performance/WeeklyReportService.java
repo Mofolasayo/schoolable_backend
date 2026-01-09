@@ -1,5 +1,6 @@
 package com.schoolable.backend.performance;
 
+import com.schoolable.backend.kpi.KpiAnalysisService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import org.springframework.stereotype.Service;
@@ -16,11 +17,14 @@ public class WeeklyReportService {
 
     private final WeeklyReportRepository weeklyReportRepository;
     private final ProfileRepository profileRepository;
+    private final KpiAnalysisService kpiAnalysisService;
 
     public WeeklyReportService(WeeklyReportRepository weeklyReportRepository, 
-                               ProfileRepository profileRepository) {
+                               ProfileRepository profileRepository,
+                               KpiAnalysisService kpiAnalysisService) {
         this.weeklyReportRepository = weeklyReportRepository;
         this.profileRepository = profileRepository;
+        this.kpiAnalysisService = kpiAnalysisService;
     }
 
     /**
@@ -157,11 +161,6 @@ public class WeeklyReportService {
                     report.setEmployeeId(employeeId);
                     report.setWeekNumber(request.getWeekNumber());
                     report.setYear(request.getYear());
-                    // Set default pillar scores (these are auto-calculated, so we use neutral defaults)
-                    report.setTechnicalScore(3);
-                    report.setBehavioralScore(3);
-                    report.setCultureFitScore(3);
-                    report.setGrowthLearningScore(3);
                 }
 
                 report.setWeekStartDate(weekStart);
@@ -172,6 +171,20 @@ public class WeeklyReportService {
                 report.setTeamworkCollaborationScore(rating.getTeamworkCollaborationScore());
                 report.setInitiativeScore(rating.getInitiativeScore());
                 report.setAttitudeTowardsWorkScore(rating.getAttitudeTowardsWorkScore());
+                
+                // CRITICAL: Map simplified ratings to core pillar scores to satisfy NOT NULL constraints
+                // Initiative → Technical Competence
+                report.setTechnicalScore(rating.getInitiativeScore());
+                
+                // Attitude → Behavioral Compliance  
+                report.setBehavioralScore(rating.getAttitudeTowardsWorkScore());
+                
+                // Teamwork → Culture Fit
+                report.setCultureFitScore(rating.getTeamworkCollaborationScore());
+                
+                // Growth/Learning: Average of the three (rounded)
+                int growthScore = Math.round((rating.getInitiativeScore() + rating.getAttitudeTowardsWorkScore() + rating.getTeamworkCollaborationScore()) / 3.0f);
+                report.setGrowthLearningScore(growthScore);
                 
                 // Set team report URL if provided
                 if (request.getTeamReportUrl() != null) {
@@ -197,6 +210,14 @@ public class WeeklyReportService {
             } catch (Exception e) {
                 System.err.println("Failed to submit simplified report for employee " + rating.getEmployeeId() + ": " + e.getMessage());
             }
+        }
+
+        // Auto-generate quarterly score to populate Teams Overview dashboard
+        try {
+            String quarter = kpiAnalysisService.getCurrentQuarter();
+            kpiAnalysisService.calculateQuarterlyScore(teamLeadId, quarter, request.getYear());
+        } catch (Exception e) {
+            System.err.println("Failed to auto-generate quarterly score: " + e.getMessage());
         }
 
         return responses;
