@@ -260,4 +260,30 @@ public class WeeklyReportController {
             return ResponseEntity.badRequest().body(error);
         }
     }
+
+    /**
+     * TEMPORARY: Delete a corrupted weekly report record
+     * DELETE /api/performance/weekly/{reportId}
+     * 
+     * This is a temporary endpoint to clean up corrupted records
+     */
+    @DeleteMapping("/{reportId}")
+    @Operation(summary = "Delete a weekly report (Admin only - temporary cleanup endpoint)")
+    public ResponseEntity<?> deleteWeeklyReport(@PathVariable Long reportId) {
+        try {
+            weeklyReportService.deleteReport(reportId);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Report deleted successfully");
+            result.put("reportId", reportId);
+            
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
 }

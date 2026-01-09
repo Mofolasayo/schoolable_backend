@@ -224,6 +224,14 @@ public class WeeklyReportService {
     }
 
     /**
+     * TEMPORARY: Delete a corrupted weekly report
+     */
+    @Transactional
+    public void deleteReport(Long reportId) {
+        weeklyReportRepository.deleteById(reportId);
+    }
+
+    /**
      * Get all reports for a specific week (admin view)
      */
     public List<WeeklyReportDto.ReportResponse> getWeeklyReports(Integer weekNumber, Integer year) {
