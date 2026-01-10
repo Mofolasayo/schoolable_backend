@@ -31,6 +31,11 @@ logging:
   level:
     root: INFO
 
+schoolable:
+  cache:
+    redis:
+      enabled: false
+
 jwt:
   secret: "super-secret-change-me-please-32bytes-minimum-1234567890"
   expirationSeconds: 86400

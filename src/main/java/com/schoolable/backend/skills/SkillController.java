@@ -77,7 +77,7 @@ public class SkillController {
             ));
         }
 
-        String org = profile != null ? profile.getOrganization() : null;
+        String org = profile != null ? profile.getDepartment() : null;
         
         if (skillRepository.existsByNameAndOrganization(req.name, org)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Skill already exists"));

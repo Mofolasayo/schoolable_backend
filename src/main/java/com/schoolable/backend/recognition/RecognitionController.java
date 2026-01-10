@@ -87,7 +87,7 @@ public class RecognitionController {
         recognition.setAchievementType(req.achievementType);
         
         if (sender != null) {
-            recognition.setOrganization(sender.getOrganization());
+            recognition.setOrganization(sender.getDepartment());
             recognition.setDepartment(sender.getDepartment());
         }
 
@@ -190,15 +190,15 @@ public class RecognitionController {
                 Long count = (Long) row[1];
                 Profile profile = profileRepository.findById(userId).orElse(null);
                 int points = recognitionRepository.getTotalPointsReceived(userId);
-                
-                return Map.of(
-                    "userId", userId.toString(),
-                    "name", profile != null ? profile.getFullName() : "Unknown",
-                    "department", profile != null ? profile.getDepartment() : "",
-                    "avatarUrl", profile != null && profile.getAvatarUrl() != null ? profile.getAvatarUrl() : "",
-                    "recognitionCount", count,
-                    "totalPoints", points
-                );
+
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("userId", userId.toString());
+                entry.put("name", profile != null ? profile.getFullName() : "Unknown");
+                entry.put("department", profile != null ? profile.getDepartment() : "");
+                entry.put("avatarUrl", profile != null && profile.getAvatarUrl() != null ? profile.getAvatarUrl() : "");
+                entry.put("recognitionCount", count);
+                entry.put("totalPoints", points);
+                return entry;
             })
             .collect(Collectors.toList());
 
