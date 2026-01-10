@@ -33,6 +33,9 @@ public class AuraDashboardController {
     @Autowired
     private AutoAuraCalculationService autoAuraService;
 
+    @Autowired
+    private AuraScoreJobService auraScoreJobService;
+
     /**
      * GET /api/performance/my-aura
      * Get the current user's Aura dashboard (for mobile app home screen)
@@ -334,16 +337,20 @@ public class AuraDashboardController {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
         
-        // Run calculation asynchronously
-        new Thread(() -> {
-            autoAuraService.calculateAllEmployeeScores();
-        }).start();
-        
+        UUID requesterId = (UUID) auth.getPrincipal();
+        AuraScoreJob job = auraScoreJobService.enqueueJob(
+            AuraScoreJobTypes.AUTO_RECALCULATE_ALL,
+            Map.of("requestedBy", requesterId.toString()),
+            3,
+            requesterId
+        );
+
         return ResponseEntity.ok(Map.of(
-            "message", "Auto-recalculation started in background",
+            "message", "Auto-recalculation queued",
+            "jobId", job.getId(),
+            "status", job.getStatus(),
             "note", "This runs automatically every Sunday at 2 AM"
         ));
     }
 }
-
 

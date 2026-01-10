@@ -1,5 +1,6 @@
 package com.schoolable.backend.attendance;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -7,6 +8,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -16,24 +18,30 @@ import java.time.ZoneOffset;
 import java.util.*;
 
 @RestController
-@RequestMapping("/attendance")
+@RequestMapping({"/api/attendance", "/attendance"})
 @Tag(name = "Attendance", description = "Check-in/Check-out and attendance management")
 public class AttendanceController {
 
     private final AttendanceRepository attendanceRepository;
     private final OfficeLocationRepository officeLocationRepository;
     private final ProfileRepository profileRepository;
-    
-    // Default check-in deadline (9:00 AM)
-    private static final LocalTime CHECK_IN_DEADLINE = LocalTime.of(9, 0);
+    private final AttendancePolicyService attendancePolicyService;
+    private final BiometricConsentRepository biometricConsentRepository;
+    private final FaceMatchService faceMatchService;
 
     public AttendanceController(
             AttendanceRepository attendanceRepository,
             OfficeLocationRepository officeLocationRepository,
-            ProfileRepository profileRepository) {
+            ProfileRepository profileRepository,
+            AttendancePolicyService attendancePolicyService,
+            BiometricConsentRepository biometricConsentRepository,
+            FaceMatchService faceMatchService) {
         this.attendanceRepository = attendanceRepository;
         this.officeLocationRepository = officeLocationRepository;
         this.profileRepository = profileRepository;
+        this.attendancePolicyService = attendancePolicyService;
+        this.biometricConsentRepository = biometricConsentRepository;
+        this.faceMatchService = faceMatchService;
     }
 
     // ==================== CHECK-IN ====================
@@ -53,12 +61,42 @@ public class AttendanceController {
             return ResponseEntity.badRequest().body(Map.of("error", "Already checked in today"));
         }
 
-        // Validate location (geo-fencing)
-        LocationValidation locationValidation = validateLocation(req.latitude(), req.longitude());
+        BiometricConsent consent = biometricConsentRepository.findByUserId(userId)
+            .filter(c -> c.getRevokedAt() == null)
+            .orElse(null);
 
-        // Determine status based on time
+        if (consent == null && !Boolean.TRUE.equals(req.consentGiven())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Biometric consent required"));
+        }
+        if (consent == null) {
+            BiometricConsent newConsent = new BiometricConsent();
+            newConsent.setUserId(userId);
+            if (req.consentVersion() != null) newConsent.setConsentVersion(req.consentVersion());
+            if (req.retentionDays() != null) newConsent.setRetentionDays(req.retentionDays());
+            consent = biometricConsentRepository.save(newConsent);
+        }
+
+        AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(userId, today);
+        AttendancePolicyService.LocationValidation locationValidation = attendancePolicyService.validateLocation(req.latitude(), req.longitude());
+
+        boolean isRemote = Boolean.TRUE.equals(req.isRemote());
+        boolean remoteAllowed = policy.schedule() != null && Boolean.TRUE.equals(policy.schedule().getRemoteAllowed());
+        boolean withinRadius = locationValidation.withinRadius();
+        if (isRemote && remoteAllowed) {
+            withinRadius = true;
+        }
+
         LocalTime now = LocalTime.now();
-        String status = now.isAfter(CHECK_IN_DEADLINE) ? "late" : "present";
+        AttendancePolicyService.CheckInEvaluation evaluation = attendancePolicyService.evaluateCheckIn(now, policy.schedule());
+
+        String status;
+        if (policy.isHoliday() || policy.isOnLeave() || !policy.isWorkDay()) {
+            status = "excused";
+        } else if (evaluation.isLate()) {
+            status = "late";
+        } else {
+            status = "present";
+        }
 
         // Create attendance record
         Attendance attendance = new Attendance();
@@ -66,18 +104,33 @@ public class AttendanceController {
         attendance.setCheckIn(OffsetDateTime.now());
         attendance.setDate(today);
         attendance.setStatus(status);
+        attendance.setIsRemote(isRemote);
+        attendance.setScheduleId(policy.schedule() != null ? policy.schedule().getId() : null);
+        attendance.setExpectedCheckIn(policy.schedule() != null ? policy.schedule().getStartTime() : null);
+        attendance.setExpectedCheckOut(policy.schedule() != null ? policy.schedule().getEndTime() : null);
         
         // Location data
         attendance.setLatitude(req.latitude());
         attendance.setLongitude(req.longitude());
         attendance.setAccuracy(req.accuracy());
         attendance.setAddress(req.address());
-        attendance.setLocation(locationValidation.officeName);
+        attendance.setLocation(locationValidation.officeName());
+        attendance.setOfficeLocationId(locationValidation.officeId());
+        attendance.setIsWithinGeofence(withinRadius);
+        attendance.setDistanceMeters(locationValidation.distanceMeters());
         
         // Photo and verification
         attendance.setPhotoUrl(req.photoUrl());
-        attendance.setVerificationStatus("pending"); // Will be updated by face recognition service
-        attendance.setFaceMatchScore(null); // To be set after verification
+        attendance.setVerificationStatus("pending");
+        attendance.setFaceMatchScore(null);
+        attendance.setLivenessScore(req.livenessScore());
+        attendance.setLivenessType(req.livenessType());
+        if (req.livenessScore() != null) {
+            attendance.setLivenessPassed(req.livenessScore() >= 0.6);
+        }
+        if (Boolean.FALSE.equals(attendance.getLivenessPassed())) {
+            attendance.setVerificationStatus("failed");
+        }
         
         // Device and network info
         attendance.setDeviceInfo(req.deviceInfo());
@@ -85,19 +138,30 @@ public class AttendanceController {
         
         attendance.setNote(req.note());
         attendance.setCreatedAt(OffsetDateTime.now());
+        attendance.setRetentionUntil(OffsetDateTime.now().plusDays(consent.getRetentionDays()));
+
+        if (req.photoUrl() != null && policy.isWorkDay() && !policy.isHoliday() && !policy.isOnLeave() && !Boolean.FALSE.equals(attendance.getLivenessPassed())) {
+            Profile profile = profileRepository.findById(userId).orElse(null);
+            if (profile != null && profile.getReferenceFaceUrl() != null) {
+                FaceMatchResult matchResult = faceMatchService.compare(profile.getReferenceFaceUrl(), req.photoUrl());
+                attendance.setFaceMatchScore(matchResult.confidence());
+                attendance.setVerificationStatus(matchResult.match() ? "verified" : "failed");
+                attendance.setFaceMatchProvider(matchResult.provider());
+            }
+        }
 
         attendanceRepository.save(attendance);
 
         // Build response
         Map<String, Object> response = buildAttendanceResponse(attendance);
-        response.put("location_validated", locationValidation.isValid);
-        response.put("within_office", locationValidation.withinRadius);
-        response.put("distance_meters", locationValidation.distanceMeters);
+        response.put("location_validated", locationValidation.isValid());
+        response.put("within_office", withinRadius);
+        response.put("distance_meters", locationValidation.distanceMeters());
         
         // If location is outside office radius, flag it
-        if (!locationValidation.withinRadius) {
+        if (!withinRadius && !isRemote) {
             attendance.setNote((attendance.getNote() != null ? attendance.getNote() + ". " : "") + 
-                "Warning: Check-in from outside office radius (" + Math.round(locationValidation.distanceMeters) + "m away)");
+                "Warning: Check-in from outside office radius (" + Math.round(locationValidation.distanceMeters()) + "m away)");
             attendance.setVerificationStatus("flagged");
             attendanceRepository.save(attendance);
         }
@@ -181,6 +245,9 @@ public class AttendanceController {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
 
         List<Attendance> records = attendanceRepository.findByDateOrderByCheckInDesc(LocalDate.now());
         List<Map<String, Object>> response = records.stream()
@@ -196,6 +263,9 @@ public class AttendanceController {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
 
         LocalDate today = LocalDate.now();
         long present = attendanceRepository.countByDateAndStatus(today, "present");
@@ -203,8 +273,12 @@ public class AttendanceController {
         long absent = attendanceRepository.countByDateAndStatus(today, "absent");
         long excused = attendanceRepository.countByDateAndStatus(today, "excused");
 
-        // Get total staff count (excluding admins)
-        long totalStaff = profileRepository.findByRoleNot("admin").size();
+        // Get total expected staff count (excluding admins and excused days)
+        List<Profile> staff = profileRepository.findByRoleNot("admin");
+        long totalStaff = staff.stream().filter(profile -> {
+            AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(profile.getId(), today);
+            return policy.isWorkDay() && !policy.isHoliday() && !policy.isOnLeave();
+        }).count();
         long checkedIn = present + late;
 
         Map<String, Object> metrics = new HashMap<>();
@@ -230,6 +304,9 @@ public class AttendanceController {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
 
         LocalDate start = LocalDate.parse(startDate);
         LocalDate end = LocalDate.parse(endDate);
@@ -252,6 +329,9 @@ public class AttendanceController {
             Authentication auth) {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
         var attendanceOpt = attendanceRepository.findById(id);
@@ -334,6 +414,9 @@ public class AttendanceController {
         }
         UUID userId = (UUID) auth.getPrincipal();
         String currentFaceUrl = payload.get("face_url");
+        if (currentFaceUrl == null || currentFaceUrl.isEmpty()) {
+            currentFaceUrl = payload.get("check_in_photo_url");
+        }
         
         if (currentFaceUrl == null || currentFaceUrl.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "face_url is required"));
@@ -352,15 +435,14 @@ public class AttendanceController {
              ));
         }
 
-        // MOCK: Always return success with random high confidence
-        // In production, this would call AWS Rekognition or similar
-        double confidence = 95.0 + (new Random().nextDouble() * 4.9);
-        boolean isMatch = true;
+        FaceMatchResult result = faceMatchService.compare(profile.getReferenceFaceUrl(), currentFaceUrl);
 
         return ResponseEntity.ok(Map.of(
-            "match", isMatch,
-            "confidence", confidence,
-            "verified", isMatch && confidence > 85.0
+            "match", result.match(),
+            "confidence", result.confidence(),
+            "verified", result.match(),
+            "provider", result.provider(),
+            "message", result.message()
         ));
     }
 
@@ -380,8 +462,46 @@ public class AttendanceController {
                 "address", o.getAddress(),
                 "latitude", o.getLatitude(),
                 "longitude", o.getLongitude(),
-                "radius_meters", o.getRadiusMeters()
+                "radius_meters", o.getRadiusMeters(),
+                "timezone", o.getTimezone()
         )).toList());
+    }
+
+    @Operation(summary = "Get today's attendance policy for current user")
+    @GetMapping("/policy/today")
+    public ResponseEntity<?> getTodayPolicy(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        LocalDate today = LocalDate.now();
+
+        AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(userId, today);
+        WorkSchedule schedule = policy.schedule();
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("date", today.toString());
+        response.put("department", policy.department());
+        response.put("isWorkDay", policy.isWorkDay());
+        response.put("isHoliday", policy.isHoliday());
+        response.put("isOnLeave", policy.isOnLeave());
+
+        if (schedule != null) {
+            Map<String, Object> scheduleDto = new LinkedHashMap<>();
+            scheduleDto.put("id", schedule.getId());
+            scheduleDto.put("name", schedule.getName());
+            scheduleDto.put("startTime", schedule.getStartTime());
+            scheduleDto.put("endTime", schedule.getEndTime());
+            scheduleDto.put("graceMinutes", schedule.getGraceMinutes());
+            scheduleDto.put("timezone", schedule.getTimezone());
+            scheduleDto.put("remoteAllowed", schedule.getRemoteAllowed());
+            scheduleDto.put("daysOfWeek", schedule.getDaysOfWeekList());
+            response.put("schedule", scheduleDto);
+        } else {
+            response.put("schedule", null);
+        }
+
+        return ResponseEntity.ok(response);
     }
 
     // ==================== HELPER METHODS ====================
@@ -400,8 +520,19 @@ public class AttendanceController {
         response.put("longitude", a.getLongitude());
         response.put("accuracy", a.getAccuracy());
         response.put("photo_url", a.getPhotoUrl());
+        response.put("is_remote", a.getIsRemote());
+        response.put("office_location_id", a.getOfficeLocationId());
+        response.put("schedule_id", a.getScheduleId());
+        response.put("expected_check_in", a.getExpectedCheckIn());
+        response.put("expected_check_out", a.getExpectedCheckOut());
         response.put("face_match_score", a.getFaceMatchScore());
         response.put("verification_status", a.getVerificationStatus());
+        response.put("is_within_geofence", a.getIsWithinGeofence());
+        response.put("distance_meters", a.getDistanceMeters());
+        response.put("liveness_score", a.getLivenessScore());
+        response.put("liveness_type", a.getLivenessType());
+        response.put("liveness_passed", a.getLivenessPassed());
+        response.put("face_match_provider", a.getFaceMatchProvider());
         response.put("note", a.getNote());
         return response;
     }
@@ -441,56 +572,18 @@ public class AttendanceController {
         return "https://api.dicebear.com/7.x/" + style + "/svg?seed=" + seed;
     }
 
-    private LocationValidation validateLocation(Double lat, Double lon) {
-        if (lat == null || lon == null) {
-            return new LocationValidation(false, false, -1, "Unknown");
-        }
-
-        List<OfficeLocation> offices = officeLocationRepository.findByIsActiveTrue();
-        if (offices.isEmpty()) {
-            return new LocationValidation(true, true, 0, "No office configured");
-        }
-
-        // Find the nearest office
-        OfficeLocation nearest = null;
-        double minDistance = Double.MAX_VALUE;
-        
-        for (OfficeLocation office : offices) {
-            double distance = haversineDistance(lat, lon, office.getLatitude(), office.getLongitude());
-            if (distance < minDistance) {
-                minDistance = distance;
-                nearest = office;
-            }
-        }
-
-        if (nearest == null) {
-            return new LocationValidation(true, false, -1, "Unknown");
-        }
-
-        boolean withinRadius = minDistance <= nearest.getRadiusMeters();
-        return new LocationValidation(true, withinRadius, minDistance, nearest.getName());
-    }
-
-    /**
-     * Calculate distance between two coordinates using Haversine formula
-     */
-    private double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
-        final double R = 6371000; // Earth's radius in meters
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
-
     private String getClientIp(HttpServletRequest request) {
         String xfHeader = request.getHeader("X-Forwarded-For");
         if (xfHeader == null || xfHeader.isEmpty()) {
             return request.getRemoteAddr();
         }
         return xfHeader.split(",")[0].trim();
+    }
+
+    private boolean isAdmin(Authentication auth) {
+        if (auth == null) return false;
+        return auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))
+            || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
     }
 
     // ==================== REQUEST/RESPONSE RECORDS ====================
@@ -500,9 +593,23 @@ public class AttendanceController {
             Double longitude,
             Double accuracy,
             String address,
+            @JsonAlias({"photo_url", "face_url", "check_in_photo_url"})
             String photoUrl,
+            @JsonAlias({"device_info"})
             String deviceInfo,
-            String note
+            String note,
+            @JsonAlias({"is_remote"})
+            Boolean isRemote,
+            @JsonAlias({"liveness_score"})
+            Double livenessScore,
+            @JsonAlias({"liveness_type"})
+            String livenessType,
+            @JsonAlias({"consent_given"})
+            Boolean consentGiven,
+            @JsonAlias({"consent_version"})
+            String consentVersion,
+            @JsonAlias({"retention_days"})
+            Integer retentionDays
     ) {}
 
     public record CheckOutRequest(String note) {}
@@ -513,10 +620,4 @@ public class AttendanceController {
             String note
     ) {}
 
-    private record LocationValidation(
-            boolean isValid,
-            boolean withinRadius,
-            double distanceMeters,
-            String officeName
-    ) {}
 }

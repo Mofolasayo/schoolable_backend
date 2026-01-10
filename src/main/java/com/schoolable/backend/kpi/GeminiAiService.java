@@ -3,29 +3,82 @@ package com.schoolable.backend.kpi;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolable.backend.ai.AiRequestLog;
+import com.schoolable.backend.ai.AiRequestLogRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.http.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.OffsetDateTime;
 import java.util.*;
 
 /**
  * Gemini AI Service
  * Handles all AI-powered analysis for KPIs and team performance
+ * 
+ * SECURITY: API key MUST be set via environment variable GEMINI_API_KEY
+ * Caching: Results cached for 1 hour via Redis
  */
 @Service
 public class GeminiAiService {
 
-    @Value("${gemini.api.key:AIzaSyBu8oPRazR8zn1A0DLmgBjVIl6KaSN5UZE}")
+    private static final Logger log = LoggerFactory.getLogger(GeminiAiService.class);
+
+    // SECURITY FIX: No default value - must be set via environment variable
+    @Value("${gemini.api.key:}")
     private String apiKey;
 
-    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+    // Temperature configuration per use case
+    @Value("${gemini.temperature.grading:0.2}")
+    private double gradingTemperature;  // More consistent for grading
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Value("${gemini.temperature.insights:0.5}")
+    private double insightsTemperature;  // More creative for insights
+
+    @Value("${gemini.temperature.analysis:0.3}")
+    private double analysisTemperature;  // Balanced for analysis
+
+    @Value("${gemini.model.primary:gemini-1.5-flash}")
+    private String primaryModel;
+
+    @Value("${gemini.model.fallback:gemini-1.5-pro}")
+    private String fallbackModel;
+
+    private static final String GEMINI_API_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent";
+
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+    private final CacheManager cacheManager;
+    private final AiRequestLogRepository aiRequestLogRepository;
+
+    private static final String PROMPT_VERSION_WEEKLY = "weekly-v2";
+    private static final String PROMPT_VERSION_WEEKLY_TEAM = "weekly-team-v2";
+    private static final String PROMPT_VERSION_QUARTERLY = "quarterly-v2";
+    private static final String PROMPT_VERSION_DAILY_REPORT = "daily-report-v2";
+
+    public GeminiAiService(
+            ObjectMapper objectMapper,
+            CacheManager cacheManager,
+            AiRequestLogRepository aiRequestLogRepository,
+            @Value("${gemini.timeout-ms:15000}") int timeoutMs) {
+        this.objectMapper = objectMapper;
+        this.cacheManager = cacheManager;
+        this.aiRequestLogRepository = aiRequestLogRepository;
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(timeoutMs);
+        factory.setReadTimeout(timeoutMs);
+        this.restTemplate = new RestTemplate(factory);
+    }
 
     /**
      * Analyze weekly KPI progress and generate insights
@@ -37,10 +90,32 @@ public class GeminiAiService {
             int weekNumber,
             int year) {
 
+        return analyzeWeeklyProgress(teamName, department, kpiData, weekNumber, year, null);
+    }
+
+    public AiAnalysisResult analyzeWeeklyProgress(
+            String teamName,
+            String department,
+            List<KpiProgressData> kpiData,
+            int weekNumber,
+            int year,
+            UUID jobId) {
+
         String prompt = buildWeeklyAnalysisPrompt(teamName, department, kpiData, weekNumber, year);
-        String aiResponse = callGeminiApi(prompt);
-        
-        return parseAiResponse(aiResponse, kpiData);
+        GeminiResponse aiResponse = generateStructuredJson(
+            prompt,
+            insightsTemperature,
+            weeklyInsightSchema(),
+            PROMPT_VERSION_WEEKLY,
+            jobId
+        );
+
+        AiAnalysisResult result = parseAiResponse(aiResponse.text(), kpiData);
+        result.promptVersion = PROMPT_VERSION_WEEKLY;
+        result.modelUsed = aiResponse.modelUsed();
+        result.requestId = aiResponse.requestId();
+        result.cacheHit = aiResponse.cacheHit();
+        return result;
     }
 
     /**
@@ -53,17 +128,46 @@ public class GeminiAiService {
             String quarter,
             int year) {
 
+        return analyzeQuarterlyPerformance(teamName, department, kpiData, quarter, year, null);
+    }
+
+    public AiAnalysisResult analyzeQuarterlyPerformance(
+            String teamName,
+            String department,
+            List<KpiProgressData> kpiData,
+            String quarter,
+            int year,
+            UUID jobId) {
+
         String prompt = buildQuarterlyAnalysisPrompt(teamName, department, kpiData, quarter, year);
-        String aiResponse = callGeminiApi(prompt);
-        
-        return parseAiResponse(aiResponse, kpiData);
+        GeminiResponse aiResponse = generateStructuredJson(
+            prompt,
+            analysisTemperature,
+            quarterlyInsightSchema(),
+            PROMPT_VERSION_QUARTERLY,
+            jobId
+        );
+
+        AiAnalysisResult result = parseAiResponse(aiResponse.text(), kpiData);
+        result.promptVersion = PROMPT_VERSION_QUARTERLY;
+        result.modelUsed = aiResponse.modelUsed();
+        result.requestId = aiResponse.requestId();
+        result.cacheHit = aiResponse.cacheHit();
+        return result;
     }
 
     /**
      * Generate content from a custom prompt (public wrapper for callGeminiApi)
      */
     public String generateContent(String prompt) {
-        return callGeminiApi(prompt);
+        GeminiResponse aiResponse = generateStructuredJson(
+            prompt,
+            analysisTemperature,
+            null,
+            "generic",
+            null
+        );
+        return aiResponse.text();
     }
 
     /**
@@ -80,6 +184,30 @@ public class GeminiAiService {
             String additionalNotes,
             List<String> individualKpis) {
 
+        return gradeDailyReport(
+            employeeName,
+            department,
+            tasksCompleted,
+            tasksInProgress,
+            blockers,
+            plannedForTomorrow,
+            additionalNotes,
+            individualKpis,
+            null
+        );
+    }
+
+    public DailyReportGradingResult gradeDailyReport(
+            String employeeName,
+            String department,
+            String tasksCompleted,
+            String tasksInProgress,
+            String blockers,
+            String plannedForTomorrow,
+            String additionalNotes,
+            List<String> individualKpis,
+            UUID jobId) {
+
         // Pre-check for empty/insufficient content - assign low score automatically
         DailyReportGradingResult preCheckResult = preValidateReportContent(
             tasksCompleted, tasksInProgress, blockers, plannedForTomorrow
@@ -91,9 +219,20 @@ public class GeminiAiService {
         String prompt = buildDailyReportGradingPrompt(
                 employeeName, department, tasksCompleted, tasksInProgress,
                 blockers, plannedForTomorrow, additionalNotes, individualKpis);
-        
-        String aiResponse = callGeminiApi(prompt);
-        return parseDailyReportGradingResponse(aiResponse);
+
+        GeminiResponse aiResponse = generateStructuredJson(
+            prompt,
+            gradingTemperature,
+            dailyReportSchema(),
+            PROMPT_VERSION_DAILY_REPORT,
+            jobId
+        );
+        DailyReportGradingResult result = parseDailyReportGradingResponse(aiResponse.text());
+        result.promptVersion = PROMPT_VERSION_DAILY_REPORT;
+        result.modelUsed = aiResponse.modelUsed();
+        result.requestId = aiResponse.requestId();
+        result.cacheHit = aiResponse.cacheHit();
+        return result;
     }
 
     /**
@@ -342,7 +481,7 @@ public class GeminiAiService {
             }
 
         } catch (Exception e) {
-            System.err.println("Error parsing daily report grading response: " + e.getMessage());
+            log.warn("Error parsing daily report grading response: {}", e.getMessage());
             result.overallScore = BigDecimal.valueOf(50);
             result.feedback = "Report received. AI grading temporarily unavailable.";
             result.strengths = List.of();
@@ -365,10 +504,41 @@ public class GeminiAiService {
             int weekNumber,
             int year) {
 
+        return analyzeWeeklyProgressWithFeedback(
+            teamName,
+            department,
+            kpiData,
+            memberFeedback,
+            weekNumber,
+            year,
+            null
+        );
+    }
+
+    public AiAnalysisResult analyzeWeeklyProgressWithFeedback(
+            String teamName,
+            String department,
+            List<KpiProgressData> kpiData,
+            List<TeamMemberFeedback> memberFeedback,
+            int weekNumber,
+            int year,
+            UUID jobId) {
+
         String prompt = buildEnhancedWeeklyAnalysisPrompt(teamName, department, kpiData, memberFeedback, weekNumber, year);
-        String aiResponse = callGeminiApi(prompt);
-        
-        return parseAiResponse(aiResponse, kpiData);
+        GeminiResponse aiResponse = generateStructuredJson(
+            prompt,
+            insightsTemperature,
+            weeklyInsightSchema(),
+            PROMPT_VERSION_WEEKLY_TEAM,
+            jobId
+        );
+
+        AiAnalysisResult result = parseAiResponse(aiResponse.text(), kpiData);
+        result.promptVersion = PROMPT_VERSION_WEEKLY_TEAM;
+        result.modelUsed = aiResponse.modelUsed();
+        result.requestId = aiResponse.requestId();
+        result.cacheHit = aiResponse.cacheHit();
+        return result;
     }
 
     /**
@@ -554,48 +724,191 @@ public class GeminiAiService {
     }
 
     /**
-     * Call the Gemini API
+     * Call the Gemini API with structured JSON enforcement.
      */
-    private String callGeminiApi(String prompt) {
-        try {
-            String url = GEMINI_API_URL + "?key=" + apiKey;
+    private GeminiResponse generateStructuredJson(
+            String prompt,
+            double temperature,
+            Map<String, Object> responseSchema,
+            String promptVersion,
+            UUID jobId) {
 
+        if (apiKey == null || apiKey.isBlank()) {
+            return new GeminiResponse(null, null, null, false);
+        }
+
+        String cacheKey = cacheKeyFor(prompt, temperature, responseSchema, promptVersion);
+        Cache cache = cacheManager.getCache("gemini");
+        if (cache != null) {
+            String cached = cache.get(cacheKey, String.class);
+            if (cached != null) {
+                UUID logId = logAiRequest(jobId, promptVersion, primaryModel, null, cached, "CACHED", 0, null);
+                return new GeminiResponse(cached, primaryModel, logId, true);
+            }
+        }
+
+        GeminiCallResult result = callGeminiApiWithModel(primaryModel, prompt, temperature, responseSchema);
+        if (result == null && fallbackModel != null && !fallbackModel.isBlank()) {
+            result = callGeminiApiWithModel(fallbackModel, prompt, temperature, responseSchema);
+        }
+
+        if (result == null) {
+            UUID logId = logAiRequest(jobId, promptVersion, primaryModel, null, null, "FAILED", 0, "No response");
+            return new GeminiResponse(null, primaryModel, logId, false);
+        }
+
+        UUID logId = logAiRequest(
+            jobId,
+            promptVersion,
+            result.modelUsed,
+            result.requestPayload,
+            result.responsePayload,
+            result.success ? "SUCCESS" : "FAILED",
+            result.latencyMs,
+            result.errorMessage
+        );
+
+        if (result.success && result.text != null && cache != null) {
+            cache.put(cacheKey, result.text);
+        }
+
+        return new GeminiResponse(result.text, result.modelUsed, logId, false);
+    }
+
+    private GeminiCallResult callGeminiApiWithModel(
+            String model,
+            String prompt,
+            double temperature,
+            Map<String, Object> responseSchema) {
+
+        try {
+            String url = String.format(GEMINI_API_URL_TEMPLATE, model) + "?key=" + apiKey;
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            // Build request body
-            Map<String, Object> requestBody = new HashMap<>();
-            List<Map<String, Object>> contents = new ArrayList<>();
-            Map<String, Object> content = new HashMap<>();
-            List<Map<String, String>> parts = new ArrayList<>();
-            parts.add(Map.of("text", prompt));
-            content.put("parts", parts);
-            contents.add(content);
-            requestBody.put("contents", contents);
-
-            // Add generation config for better JSON output
-            Map<String, Object> generationConfig = new HashMap<>();
-            generationConfig.put("temperature", 0.3);
-            generationConfig.put("maxOutputTokens", 1024);
-            requestBody.put("generationConfig", generationConfig);
+            Map<String, Object> requestBody = buildRequestBody(prompt, temperature, responseSchema);
+            String requestPayload = objectMapper.writeValueAsString(requestBody);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
 
+            long start = System.currentTimeMillis();
             ResponseEntity<String> response = restTemplate.exchange(
                 url, HttpMethod.POST, entity, String.class);
+            int latency = (int) (System.currentTimeMillis() - start);
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                return extractTextFromResponse(response.getBody());
+                String extracted = extractTextFromResponse(response.getBody());
+                return new GeminiCallResult(
+                    extracted,
+                    model,
+                    requestPayload,
+                    response.getBody(),
+                    latency,
+                    extracted != null,
+                    extracted == null ? "Empty response" : null
+                );
             }
 
-            System.err.println("Gemini API error: " + response.getStatusCode());
-            return null;
-
+            return new GeminiCallResult(
+                null,
+                model,
+                requestPayload,
+                response.getBody(),
+                latency,
+                false,
+                "HTTP " + response.getStatusCode()
+            );
         } catch (Exception e) {
-            System.err.println("Error calling Gemini API: " + e.getMessage());
-            e.printStackTrace();
-            return null;
+            return new GeminiCallResult(
+                null,
+                model,
+                null,
+                null,
+                0,
+                false,
+                e.getMessage()
+            );
         }
+    }
+
+    private Map<String, Object> buildRequestBody(
+            String prompt,
+            double temperature,
+            Map<String, Object> responseSchema) {
+
+        Map<String, Object> requestBody = new HashMap<>();
+        List<Map<String, Object>> contents = new ArrayList<>();
+        Map<String, Object> content = new HashMap<>();
+        List<Map<String, String>> parts = new ArrayList<>();
+        parts.add(Map.of("text", prompt));
+        content.put("parts", parts);
+        contents.add(content);
+        requestBody.put("contents", contents);
+
+        Map<String, Object> generationConfig = new HashMap<>();
+        generationConfig.put("temperature", temperature);
+        generationConfig.put("maxOutputTokens", 1024);
+        if (responseSchema != null) {
+            generationConfig.put("responseMimeType", "application/json");
+            generationConfig.put("responseSchema", responseSchema);
+        }
+        requestBody.put("generationConfig", generationConfig);
+        return requestBody;
+    }
+
+    private String cacheKeyFor(
+            String prompt,
+            double temperature,
+            Map<String, Object> responseSchema,
+            String promptVersion) {
+        String schema = "";
+        if (responseSchema != null) {
+            try {
+                schema = objectMapper.writeValueAsString(responseSchema);
+            } catch (JsonProcessingException e) {
+                schema = responseSchema.toString();
+            }
+        }
+        String raw = promptVersion + "|" + temperature + "|" + primaryModel + "|" + prompt + "|" + schema;
+        return sha256(raw);
+    }
+
+    private String sha256(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(input.hashCode());
+        }
+    }
+
+    private UUID logAiRequest(
+            UUID jobId,
+            String promptVersion,
+            String model,
+            String requestPayload,
+            String responsePayload,
+            String status,
+            Integer latencyMs,
+            String errorMessage) {
+
+        AiRequestLog logEntry = new AiRequestLog();
+        logEntry.setJobId(jobId);
+        logEntry.setPromptVersion(promptVersion);
+        logEntry.setModel(model);
+        logEntry.setRequestPayload(requestPayload);
+        logEntry.setResponsePayload(responsePayload);
+        logEntry.setStatus(status);
+        logEntry.setLatencyMs(latencyMs);
+        logEntry.setErrorMessage(errorMessage);
+        logEntry.setCreatedAt(OffsetDateTime.now());
+
+        return aiRequestLogRepository.save(logEntry).getId();
     }
 
     /**
@@ -613,9 +926,60 @@ public class GeminiAiService {
                 }
             }
         } catch (JsonProcessingException e) {
-            System.err.println("Error parsing Gemini response: " + e.getMessage());
+            log.warn("Error parsing Gemini response: {}", e.getMessage());
         }
         return null;
+    }
+
+    private Map<String, Object> weeklyInsightSchema() {
+        return Map.of(
+            "type", "object",
+            "properties", Map.of(
+                "kpiScore", Map.of("type", "number"),
+                "summary", Map.of("type", "string"),
+                "topPerforming", Map.of("type", "array", "items", Map.of("type", "string")),
+                "needsAttention", Map.of("type", "array", "items", Map.of("type", "string")),
+                "recommendations", Map.of("type", "array", "items", Map.of("type", "string")),
+                "riskAlerts", Map.of("type", "array", "items", Map.of("type", "string"))
+            ),
+            "required", List.of("kpiScore", "summary", "topPerforming", "needsAttention", "recommendations", "riskAlerts"),
+            "additionalProperties", false
+        );
+    }
+
+    private Map<String, Object> quarterlyInsightSchema() {
+        return Map.of(
+            "type", "object",
+            "properties", Map.of(
+                "kpiScore", Map.of("type", "number"),
+                "summary", Map.of("type", "string"),
+                "achievements", Map.of("type", "array", "items", Map.of("type", "string")),
+                "challenges", Map.of("type", "array", "items", Map.of("type", "string")),
+                "nextQuarterFocus", Map.of("type", "array", "items", Map.of("type", "string")),
+                "overallAssessment", Map.of("type", "string")
+            ),
+            "required", List.of("kpiScore", "summary", "achievements", "challenges", "nextQuarterFocus", "overallAssessment"),
+            "additionalProperties", false
+        );
+    }
+
+    private Map<String, Object> dailyReportSchema() {
+        return Map.of(
+            "type", "object",
+            "properties", Map.of(
+                "overallScore", Map.of("type", "number"),
+                "clarityScore", Map.of("type", "number"),
+                "productivityScore", Map.of("type", "number"),
+                "kpiAlignmentScore", Map.of("type", "number"),
+                "feedback", Map.of("type", "string"),
+                "strengths", Map.of("type", "array", "items", Map.of("type", "string")),
+                "improvements", Map.of("type", "array", "items", Map.of("type", "string")),
+                "suggestionsForTomorrow", Map.of("type", "array", "items", Map.of("type", "string")),
+                "auraBoostTips", Map.of("type", "array", "items", Map.of("type", "string"))
+            ),
+            "required", List.of("overallScore", "clarityScore", "productivityScore", "kpiAlignmentScore", "feedback", "strengths", "improvements", "suggestionsForTomorrow", "auraBoostTips"),
+            "additionalProperties", false
+        );
     }
 
     /**
@@ -690,7 +1054,7 @@ public class GeminiAiService {
             result.rawResponse = objectMapper.convertValue(json, Map.class);
 
         } catch (Exception e) {
-            System.err.println("Error parsing AI response: " + e.getMessage());
+            log.warn("Error parsing AI response: {}", e.getMessage());
             // Fallback
             result.kpiScore = calculateManualScore(kpiData);
             result.summary = aiResponse.length() > 200 ? aiResponse.substring(0, 200) : aiResponse;
@@ -746,6 +1110,29 @@ public class GeminiAiService {
         return BigDecimal.valueOf(totalScore).setScale(2, RoundingMode.HALF_UP);
     }
 
+    private record GeminiResponse(String text, String modelUsed, UUID requestId, boolean cacheHit) {}
+
+    private static class GeminiCallResult {
+        private final String text;
+        private final String modelUsed;
+        private final String requestPayload;
+        private final String responsePayload;
+        private final Integer latencyMs;
+        private final boolean success;
+        private final String errorMessage;
+
+        private GeminiCallResult(String text, String modelUsed, String requestPayload, String responsePayload,
+                                 Integer latencyMs, boolean success, String errorMessage) {
+            this.text = text;
+            this.modelUsed = modelUsed;
+            this.requestPayload = requestPayload;
+            this.responsePayload = responsePayload;
+            this.latencyMs = latencyMs;
+            this.success = success;
+            this.errorMessage = errorMessage;
+        }
+    }
+
     // ==================== DATA CLASSES ====================
 
     /**
@@ -784,6 +1171,10 @@ public class GeminiAiService {
         public Map<String, Object> recommendations;
         public Map<String, Object> riskAlerts;
         public Map<String, Object> rawResponse;
+        public UUID requestId;
+        public String promptVersion;
+        public String modelUsed;
+        public boolean cacheHit;
     }
 
     /**
@@ -823,6 +1214,10 @@ public class GeminiAiService {
         public List<String> improvements;
         public List<String> suggestionsForTomorrow; // AI-generated priorities for next day
         public List<String> auraBoostTips; // Tips to boost Aura Score
+        public UUID requestId;
+        public String promptVersion;
+        public String modelUsed;
+        public boolean cacheHit;
 
         public DailyReportGradingResult() {}
     }

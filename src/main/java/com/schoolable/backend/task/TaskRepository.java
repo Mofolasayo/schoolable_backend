@@ -1,14 +1,16 @@
 package com.schoolable.backend.task;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
-public interface TaskRepository extends JpaRepository<Task, Long> {
+public interface TaskRepository extends JpaRepository<Task, Long>, JpaSpecificationExecutor<Task> {
     List<Task> findByAssigneeIdOrderByCreatedAtDesc(UUID assigneeId);
+    List<Task> findByAssigneeIdAndCreatedAtAfterOrderByCreatedAtDesc(UUID assigneeId, OffsetDateTime after);
     List<Task> findAllByOrderByCreatedAtDesc();
     
     // Count methods for performance calculations
@@ -37,4 +39,10 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     // Response time calculation - get tasks with updates
     @Query("SELECT t FROM Task t WHERE t.assigneeId = :assigneeId AND t.status = 'Completed' AND t.createdAt >= :after")
     List<Task> findCompletedTasksAfter(@Param("assigneeId") UUID assigneeId, @Param("after") OffsetDateTime after);
+
+    @Query("SELECT COUNT(t) FROM Task t WHERE t.organization = :department AND t.status IN :statuses AND t.updatedAt BETWEEN :start AND :end")
+    long countByDepartmentStatusAndUpdatedAtBetween(@Param("department") String department, @Param("statuses") List<String> statuses, @Param("start") OffsetDateTime start, @Param("end") OffsetDateTime end);
+
+    @Query("SELECT COUNT(t) FROM Task t WHERE t.assigneeId = :assigneeId AND t.status IN :statuses AND t.updatedAt BETWEEN :start AND :end")
+    long countByAssigneeStatusAndUpdatedAtBetween(@Param("assigneeId") UUID assigneeId, @Param("statuses") List<String> statuses, @Param("start") OffsetDateTime start, @Param("end") OffsetDateTime end);
 }

@@ -1,8 +1,12 @@
 package com.schoolable.backend.kpi;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -49,6 +53,22 @@ public class TeamKpi {
     // Status
     @Column(name = "is_active")
     private Boolean isActive = true;
+
+    @Column(name = "version")
+    private Integer version = 1;
+
+    @Column(name = "progress_source", length = 50)
+    private String progressSource;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "progress_config", columnDefinition = "jsonb")
+    private Map<String, Object> progressConfig;
+
+    @Column(name = "auto_progress_enabled")
+    private Boolean autoProgressEnabled = false;
+
+    @Column(name = "last_progress_sync_at")
+    private OffsetDateTime lastProgressSyncAt;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
@@ -101,6 +121,21 @@ public class TeamKpi {
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
+
+    public Integer getVersion() { return version; }
+    public void setVersion(Integer version) { this.version = version; }
+
+    public String getProgressSource() { return progressSource; }
+    public void setProgressSource(String progressSource) { this.progressSource = progressSource; }
+
+    public Map<String, Object> getProgressConfig() { return progressConfig; }
+    public void setProgressConfig(Map<String, Object> progressConfig) { this.progressConfig = progressConfig; }
+
+    public Boolean getAutoProgressEnabled() { return autoProgressEnabled; }
+    public void setAutoProgressEnabled(Boolean autoProgressEnabled) { this.autoProgressEnabled = autoProgressEnabled; }
+
+    public OffsetDateTime getLastProgressSyncAt() { return lastProgressSyncAt; }
+    public void setLastProgressSyncAt(OffsetDateTime lastProgressSyncAt) { this.lastProgressSyncAt = lastProgressSyncAt; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

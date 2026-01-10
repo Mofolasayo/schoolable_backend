@@ -1,12 +1,24 @@
 package com.schoolable.backend.task;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
 @Table(name = "tasks")
 public class Task {
+
+    // Task Status Enum for consistent workflow
+    public enum TaskStatus {
+        TODO,
+        IN_PROGRESS,
+        REVIEW,
+        DONE,
+        CANCELLED
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -20,6 +32,8 @@ public class Task {
 
     private String organization;
     private String priority;
+    
+    // Using String for backward compatibility, but validated against enum
     private String status;
 
     @Column(name = "due_date")
@@ -61,6 +75,25 @@ public class Task {
     // Response Time Tracking
     @Column(name = "first_response_at")
     private OffsetDateTime firstResponseAt; // First action by assignee
+
+    // ============== TASK DEPENDENCIES ==============
+    // The task that blocks this task from starting
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "blocked_by_id")
+    @JsonIgnore
+    private Task blockedBy;
+
+    // Tasks that are blocked by this task
+    @OneToMany(mappedBy = "blockedBy", fetch = FetchType.LAZY)
+    @JsonIgnore
+    private List<Task> blocking = new ArrayList<>();
+
+    // ============== RECURRING TASKS ==============
+    @Column(name = "recurring_template_id")
+    private UUID recurringTemplateId; // Reference to RecurringTaskTemplate if created from one
+
+    @Column(name = "is_recurring_instance")
+    private Boolean isRecurringInstance = false;
 
     @PrePersist
     protected void onCreate() {
@@ -135,4 +168,30 @@ public class Task {
 
     public OffsetDateTime getFirstResponseAt() { return firstResponseAt; }
     public void setFirstResponseAt(OffsetDateTime firstResponseAt) { this.firstResponseAt = firstResponseAt; }
+
+    // Dependency getters/setters
+    public Task getBlockedBy() { return blockedBy; }
+    public void setBlockedBy(Task blockedBy) { this.blockedBy = blockedBy; }
+
+    public List<Task> getBlocking() { return blocking; }
+    public void setBlocking(List<Task> blocking) { this.blocking = blocking; }
+
+    public Long getBlockedById() { 
+        return blockedBy != null ? blockedBy.getId() : null; 
+    }
+
+    public boolean isBlocked() {
+        if (blockedBy == null) {
+            return false;
+        }
+        String status = blockedBy.getStatus() != null ? blockedBy.getStatus().trim().toUpperCase() : "";
+        return !(status.equals("DONE") || status.equals("COMPLETED"));
+    }
+
+    // Recurring task getters/setters
+    public UUID getRecurringTemplateId() { return recurringTemplateId; }
+    public void setRecurringTemplateId(UUID recurringTemplateId) { this.recurringTemplateId = recurringTemplateId; }
+
+    public Boolean getIsRecurringInstance() { return isRecurringInstance; }
+    public void setIsRecurringInstance(Boolean isRecurringInstance) { this.isRecurringInstance = isRecurringInstance; }
 }

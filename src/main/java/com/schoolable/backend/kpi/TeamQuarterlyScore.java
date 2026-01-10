@@ -50,6 +50,15 @@ public class TeamQuarterlyScore {
     @Column(name = "ai_summary", columnDefinition = "TEXT")
     private String aiSummary;
 
+    @Column(name = "ai_request_id")
+    private UUID aiRequestId;
+
+    @Column(name = "prompt_version", length = 20)
+    private String promptVersion;
+
+    @Column(name = "model_used", length = 100)
+    private String modelUsed;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -106,6 +115,15 @@ public class TeamQuarterlyScore {
 
     public String getAiSummary() { return aiSummary; }
     public void setAiSummary(String aiSummary) { this.aiSummary = aiSummary; }
+
+    public UUID getAiRequestId() { return aiRequestId; }
+    public void setAiRequestId(UUID aiRequestId) { this.aiRequestId = aiRequestId; }
+
+    public String getPromptVersion() { return promptVersion; }
+    public void setPromptVersion(String promptVersion) { this.promptVersion = promptVersion; }
+
+    public String getModelUsed() { return modelUsed; }
+    public void setModelUsed(String modelUsed) { this.modelUsed = modelUsed; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

@@ -19,6 +19,8 @@ public class OfficeLocation {
     @Column(name = "radius_meters")
     private Integer radiusMeters;
 
+    private String timezone;
+
     @Column(name = "is_active")
     private Boolean isActive;
 
@@ -43,6 +45,9 @@ public class OfficeLocation {
 
     public Integer getRadiusMeters() { return radiusMeters; }
     public void setRadiusMeters(Integer radiusMeters) { this.radiusMeters = radiusMeters; }
+
+    public String getTimezone() { return timezone; }
+    public void setTimezone(String timezone) { this.timezone = timezone; }
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }

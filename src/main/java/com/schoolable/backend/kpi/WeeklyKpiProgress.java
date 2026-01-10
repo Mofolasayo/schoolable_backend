@@ -3,6 +3,7 @@ package com.schoolable.backend.kpi;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -39,6 +40,12 @@ public class WeeklyKpiProgress {
 
     @Column(columnDefinition = "TEXT")
     private String notes;
+
+    @Column(length = 30)
+    private String source = "manual";
+
+    @Column(name = "ingested_at")
+    private OffsetDateTime ingestedAt;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
@@ -78,6 +85,12 @@ public class WeeklyKpiProgress {
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
+
+    public OffsetDateTime getIngestedAt() { return ingestedAt; }
+    public void setIngestedAt(OffsetDateTime ingestedAt) { this.ingestedAt = ingestedAt; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

@@ -2,6 +2,8 @@ package com.schoolable.backend.config;
 
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,6 +14,8 @@ import java.util.UUID;
 
 @Configuration
 public class AdminInitializer {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminInitializer.class);
 
     @Bean
     CommandLineRunner seedSuperAdmin(ProfileRepository profileRepository, PasswordEncoder passwordEncoder) {
@@ -34,7 +38,7 @@ public class AdminInitializer {
                         if (needsUpdate) {
                             existing.setUpdatedAt(OffsetDateTime.now());
                             profileRepository.save(existing);
-                            System.out.println("✅ Admin user updated with job_title");
+                            log.info("Admin user updated with job_title");
                         }
                     },
                     () -> {
@@ -51,7 +55,7 @@ public class AdminInitializer {
                         admin.setCreatedAt(OffsetDateTime.now());
                         admin.setUpdatedAt(OffsetDateTime.now());
                         profileRepository.save(admin);
-                        System.out.println("✅ Admin user created with job_title");
+                        log.info("Admin user created with job_title");
                     }
             );
         };

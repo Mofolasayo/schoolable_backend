@@ -70,6 +70,24 @@ public interface DailyReportRepository extends JpaRepository<DailyReport, Long> 
         @Param("endDate") LocalDate endDate
     );
 
+    @Query("SELECT COUNT(r) FROM DailyReport r, com.schoolable.backend.profile.Profile p " +
+           "WHERE r.employeeId = p.id AND p.department = :department " +
+           "AND r.reportDate BETWEEN :startDate AND :endDate")
+    Long countByDepartmentAndDateRange(
+        @Param("department") String department,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
+    @Query("SELECT AVG(r.aiScore) FROM DailyReport r, com.schoolable.backend.profile.Profile p " +
+           "WHERE r.employeeId = p.id AND p.department = :department " +
+           "AND r.reportDate BETWEEN :startDate AND :endDate AND r.aiScore IS NOT NULL")
+    Double getAverageAiScoreForDepartment(
+        @Param("department") String department,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
     /**
      * Count reports submitted by employee in a week
      */

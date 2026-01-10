@@ -2,6 +2,8 @@ package com.schoolable.backend.storage;
 
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -21,6 +23,8 @@ import java.util.UUID;
 @Service
 public class StorageService {
 
+    private static final Logger log = LoggerFactory.getLogger(StorageService.class);
+
     private final Cloudinary cloudinary;
 
     public StorageService(
@@ -29,7 +33,7 @@ public class StorageService {
             @Value("${cloudinary.api-secret:}") String apiSecret) {
         
         if (cloudName.isEmpty() || apiKey.isEmpty() || apiSecret.isEmpty()) {
-            System.out.println("⚠️ Cloudinary not configured. File uploads will be disabled.");
+            log.warn("Cloudinary not configured. File uploads will be disabled.");
             this.cloudinary = null;
         } else {
             this.cloudinary = new Cloudinary(ObjectUtils.asMap(
@@ -38,7 +42,7 @@ public class StorageService {
                 "api_secret", apiSecret,
                 "secure", true
             ));
-            System.out.println("✅ Cloudinary configured for cloud: " + cloudName);
+            log.info("Cloudinary configured for cloud: {}", cloudName);
         }
     }
 
@@ -197,7 +201,7 @@ public class StorageService {
             Map result = cloudinary.uploader().destroy(publicId, ObjectUtils.emptyMap());
             return "ok".equals(result.get("result"));
         } catch (IOException e) {
-            System.err.println("Failed to delete file: " + publicId + " - " + e.getMessage());
+            log.warn("Failed to delete file {}: {}", publicId, e.getMessage());
             return false;
         }
     }

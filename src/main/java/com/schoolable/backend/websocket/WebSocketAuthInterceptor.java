@@ -2,6 +2,8 @@ package com.schoolable.backend.websocket;
 
 import com.schoolable.backend.auth.JwtService;
 import io.jsonwebtoken.Claims;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompCommand;
@@ -23,6 +25,8 @@ import java.util.UUID;
  */
 @Component
 public class WebSocketAuthInterceptor implements ChannelInterceptor {
+
+    private static final Logger log = LoggerFactory.getLogger(WebSocketAuthInterceptor.class);
 
     private final JwtService jwtService;
 
@@ -56,13 +60,13 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                     // Set authentication in accessor (available throughout session)
                     accessor.setUser(new WebSocketPrincipal(userId, role));
                     
-                    System.out.println("✅ WebSocket authenticated: " + userId);
+                    log.info("WebSocket authenticated: {}", userId);
                 } catch (Exception e) {
-                    System.out.println("❌ WebSocket auth failed: " + e.getMessage());
+                    log.warn("WebSocket auth failed: {}", e.getMessage());
                     throw new IllegalArgumentException("Invalid token");
                 }
             } else {
-                System.out.println("⚠️ WebSocket connection without Authorization header");
+                log.warn("WebSocket connection without Authorization header");
                 // Allow connection but mark as unauthenticated
                 // Some endpoints might be public
             }

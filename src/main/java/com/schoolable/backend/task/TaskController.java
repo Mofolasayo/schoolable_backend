@@ -5,8 +5,14 @@ import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.websocket.WebSocketMessageController;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,9 +20,11 @@ import java.time.OffsetDateTime;
 import java.util.*;
 
 @RestController
-@RequestMapping("/tasks")
+@RequestMapping({"/api/tasks", "/tasks"})
 @Tag(name = "Tasks")
 public class TaskController {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskController.class);
 
     private final TaskRepository taskRepository;
     private final TaskSubtaskRepository subtaskRepository;
@@ -42,62 +50,95 @@ public class TaskController {
 
     @Operation(summary = "Get all tasks with related data")
     @GetMapping
-    public ResponseEntity<?> getAllTasks(Authentication auth) {
-        System.out.println("🤖 TaskController.getAllTasks reached");
-        if (auth == null) {
-            System.out.println("   ❌ Auth is NULL");
+    public ResponseEntity<?> getAllTasks(
+            Authentication auth,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String priority,
+            @RequestParam(required = false) String assigneeId,
+            @RequestParam(required = false) String department,
+            @RequestParam(required = false) String query) {
+
+        if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
-        System.out.println("   ✅ Auth principal: " + auth.getPrincipal());
-        
-        if (auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
-        List<Task> tasks = taskRepository.findAllByOrderByCreatedAtDesc();
-        List<Map<String, Object>> result = tasks.stream()
-                .map(this::buildTaskResponse)
-                .toList();
+        UUID assignee = assigneeId != null ? UUID.fromString(assigneeId) : null;
+        String normalizedStatus = normalizeStatus(status);
 
-        return ResponseEntity.ok(result);
+        var spec = TaskSpecifications.hasAssignee(assignee)
+            .and(TaskSpecifications.hasDepartment(department))
+            .and(TaskSpecifications.hasStatus(normalizedStatus))
+            .and(TaskSpecifications.hasPriority(priority))
+            .and(TaskSpecifications.titleContains(query));
+
+        Page<Task> pageData = taskRepository.findAll(
+            spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        );
+
+        List<Map<String, Object>> result = pageData.getContent().stream()
+            .map(this::buildTaskResponse)
+            .toList();
+
+        return ResponseEntity.ok(Map.of(
+            "items", result,
+            "page", page,
+            "size", size,
+            "total", pageData.getTotalElements()
+        ));
     }
 
     @Operation(summary = "Get tasks assigned to the current user")
-
     @GetMapping("/assigned")
-    public ResponseEntity<?> getMyTasks(Authentication auth) {
-        System.out.println("🤖 TaskController.getMyTasks reached");
-        try {
-            if (auth == null) {
-                System.out.println("   ❌ Auth is NULL");
-                return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Auth is null)"));
-            }
-            if (auth.getPrincipal() == null) {
-                System.out.println("   ❌ Principal is null");
-                return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated (Principal is null)"));
-            }
-            
-            UUID userId = (UUID) auth.getPrincipal();
-            System.out.println("   Fetching tasks for user: " + userId);
+    public ResponseEntity<?> getMyTasks(
+            Authentication auth,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String priority,
+            @RequestParam(required = false) String query) {
 
-            List<Task> tasks = taskRepository.findByAssigneeIdOrderByCreatedAtDesc(userId);
-            System.out.println("   ✅ Tasks found: " + tasks.size());
-            
-            List<Map<String, Object>> result = tasks.stream()
-                    .map(this::buildTaskResponse)
-                    .toList();
-
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            System.out.println("   ❌ ERROR in getMyTasks: " + e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.status(500).body(Map.of("error", "Internal Error: " + e.getMessage()));
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
+
+        UUID userId = (UUID) auth.getPrincipal();
+        String normalizedStatus = normalizeStatus(status);
+
+        var spec = TaskSpecifications.hasAssignee(userId)
+            .and(TaskSpecifications.hasStatus(normalizedStatus))
+            .and(TaskSpecifications.hasPriority(priority))
+            .and(TaskSpecifications.titleContains(query));
+
+        Page<Task> pageData = taskRepository.findAll(
+            spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        );
+
+        List<Map<String, Object>> result = pageData.getContent().stream()
+            .map(this::buildTaskResponse)
+            .toList();
+
+        return ResponseEntity.ok(Map.of(
+            "items", result,
+            "page", page,
+            "size", size,
+            "total", pageData.getTotalElements()
+        ));
     }
 
     @Operation(summary = "Get tasks for the current user's team (department)")
     @GetMapping("/team")
-    public ResponseEntity<?> getTeamTasks(Authentication auth) {
+    public ResponseEntity<?> getTeamTasks(
+            Authentication auth,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String priority,
+            @RequestParam(required = false) String query) {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
@@ -107,18 +148,36 @@ public class TaskController {
         if (profileOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
         }
+        Profile profile = profileOpt.get();
+        if (!isAdmin(auth) && !Boolean.TRUE.equals(profile.getIsTeamLead())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Team lead access required"));
+        }
         
-        String department = profileOpt.get().getDepartment();
+        String department = profile.getDepartment();
         if (department == null || department.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "User does not belong to a department"));
         }
 
-        List<Task> tasks = taskRepository.findByOrganizationOrderByCreatedAtDesc(department);
-        List<Map<String, Object>> result = tasks.stream()
-                .map(this::buildTaskResponse)
-                .toList();
+        String normalizedStatus = normalizeStatus(status);
+        var spec = TaskSpecifications.hasDepartment(department)
+            .and(TaskSpecifications.hasStatus(normalizedStatus))
+            .and(TaskSpecifications.hasPriority(priority))
+            .and(TaskSpecifications.titleContains(query));
 
-        return ResponseEntity.ok(result);
+        Page<Task> pageData = taskRepository.findAll(
+            spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        );
+
+        List<Map<String, Object>> result = pageData.getContent().stream()
+            .map(this::buildTaskResponse)
+            .toList();
+
+        return ResponseEntity.ok(Map.of(
+            "items", result,
+            "page", page,
+            "size", size,
+            "total", pageData.getTotalElements()
+        ));
     }
 
     @Operation(summary = "Get a single task with all details")
@@ -128,38 +187,65 @@ public class TaskController {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
 
+        UUID userId = (UUID) auth.getPrincipal();
         var taskOpt = taskRepository.findById(id);
         if (taskOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
         }
 
-        return ResponseEntity.ok(buildTaskResponse(taskOpt.get()));
+        Task task = taskOpt.get();
+        if (!canViewTask(userId, auth, task)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
+        }
+
+        return ResponseEntity.ok(buildTaskResponse(task));
     }
 
     @Operation(summary = "Create a new task")
     @PostMapping
     @Transactional
     public ResponseEntity<?> createTask(@RequestBody CreateTaskRequest req, Authentication auth) {
-        System.out.println("🤖 TaskController.createTask reached");
         if (auth == null || auth.getPrincipal() == null) {
-            System.out.println("   ❌ Auth/Principal is NULL");
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
         UUID userId = (UUID) auth.getPrincipal();
+
+        Profile creatorProfile = profileRepository.findById(userId).orElse(null);
+        if (!isAdmin(auth) && (creatorProfile == null || !Boolean.TRUE.equals(creatorProfile.getIsTeamLead()))) {
+            return ResponseEntity.status(403).body(Map.of("error", "Team lead or admin access required"));
+        }
+
+        String department = req.organization();
+        if (!isAdmin(auth) && creatorProfile != null) {
+            if (department == null || department.isBlank()) {
+                department = creatorProfile.getDepartment();
+            } else if (!department.equals(creatorProfile.getDepartment())) {
+                return ResponseEntity.status(403).body(Map.of("error", "Cannot create tasks outside your department"));
+            }
+        }
 
         Task task = new Task();
         task.setTitle(req.title());
         task.setDescription(req.description());
         task.setAssigneeId(req.assigneeId() != null ? UUID.fromString(req.assigneeId()) : null);
-        task.setOrganization(req.organization());
+        task.setOrganization(department);
         task.setPriority(req.priority() != null ? req.priority() : "Medium");
-        task.setStatus("Pending");
+        task.setStatus(Task.TaskStatus.TODO.name());
         task.setDueDate(req.dueDate() != null ? OffsetDateTime.parse(req.dueDate()) : null);
         task.setDueTime(req.dueTime() != null ? java.time.LocalTime.parse(req.dueTime()) : null);
         task.setTags(req.tags() != null ? req.tags().toArray(new String[0]) : new String[0]);
         task.setProgress(0);
         task.setCreatedBy(userId);
         task.setCreatedAt(OffsetDateTime.now());
+        if (req.blockedById() != null) {
+            taskRepository.findById(req.blockedById()).ifPresent(task::setBlockedBy);
+        }
+        if (req.recurringTemplateId() != null) {
+            task.setRecurringTemplateId(UUID.fromString(req.recurringTemplateId()));
+        }
+        if (req.isRecurringInstance() != null) {
+            task.setIsRecurringInstance(req.isRecurringInstance());
+        }
 
         task = taskRepository.save(task);
 
@@ -203,6 +289,7 @@ public class TaskController {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
+        UUID userId = (UUID) auth.getPrincipal();
 
         var taskOpt = taskRepository.findById(id);
         if (taskOpt.isEmpty()) {
@@ -210,15 +297,43 @@ public class TaskController {
         }
 
         Task task = taskOpt.get();
+        if (!canManageTask(userId, auth, task)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
+        }
         if (req.title() != null) task.setTitle(req.title());
         if (req.description() != null) task.setDescription(req.description());
         if (req.assigneeId() != null) task.setAssigneeId(UUID.fromString(req.assigneeId()));
         if (req.organization() != null) task.setOrganization(req.organization());
         if (req.priority() != null) task.setPriority(req.priority());
-        if (req.status() != null) task.setStatus(req.status());
+        if (req.status() != null) {
+            String nextStatus = normalizeStatus(req.status());
+            if (!isValidTransition(task.getStatus(), nextStatus)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid status transition"));
+            }
+            if (task.isBlocked() && (Task.TaskStatus.IN_PROGRESS.name().equals(nextStatus)
+                || Task.TaskStatus.REVIEW.name().equals(nextStatus)
+                || Task.TaskStatus.DONE.name().equals(nextStatus))) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Task is blocked by another task"));
+            }
+            task.setStatus(nextStatus);
+        }
         if (req.dueDate() != null) task.setDueDate(OffsetDateTime.parse(req.dueDate()));
+        if (req.dueTime() != null) task.setDueTime(java.time.LocalTime.parse(req.dueTime()));
         if (req.tags() != null) task.setTags(req.tags().toArray(new String[0]));
         if (req.progress() != null) task.setProgress(req.progress());
+        if (req.blockedById() != null) {
+            if (req.blockedById() == 0) {
+                task.setBlockedBy(null);
+            } else {
+                taskRepository.findById(req.blockedById()).ifPresent(task::setBlockedBy);
+            }
+        }
+        if (req.recurringTemplateId() != null) {
+            task.setRecurringTemplateId(UUID.fromString(req.recurringTemplateId()));
+        }
+        if (req.isRecurringInstance() != null) {
+            task.setIsRecurringInstance(req.isRecurringInstance());
+        }
 
         taskRepository.save(task);
         
@@ -235,6 +350,7 @@ public class TaskController {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
+        UUID userId = (UUID) auth.getPrincipal();
 
         var taskOpt = taskRepository.findById(id);
         if (taskOpt.isEmpty()) {
@@ -242,22 +358,34 @@ public class TaskController {
         }
 
         Task task = taskOpt.get();
+        if (!canManageTask(userId, auth, task)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
+        }
         String oldStatus = task.getStatus();
-        task.setStatus(req.status());
+        String nextStatus = normalizeStatus(req.status());
+        if (!isValidTransition(oldStatus, nextStatus)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid status transition"));
+        }
+        if (task.isBlocked() && (Task.TaskStatus.IN_PROGRESS.name().equals(nextStatus)
+            || Task.TaskStatus.REVIEW.name().equals(nextStatus)
+            || Task.TaskStatus.DONE.name().equals(nextStatus))) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Task is blocked by another task"));
+        }
+        task.setStatus(nextStatus);
         if (req.progress() != null) {
             task.setProgress(req.progress());
         } else {
             // Auto-set progress based on status
-            if ("Completed".equals(req.status())) {
+            if (Task.TaskStatus.DONE.name().equals(nextStatus)) {
                 task.setProgress(100);
-            } else if ("Pending".equals(req.status())) {
+            } else if (Task.TaskStatus.TODO.name().equals(nextStatus)) {
                 task.setProgress(0);
             }
         }
         
         // Set rating_pending when task is marked as completed
         // This triggers the rating popup for the task creator
-        if ("Completed".equals(req.status()) && !"Completed".equals(oldStatus)) {
+        if (Task.TaskStatus.DONE.name().equals(nextStatus) && !Task.TaskStatus.DONE.name().equals(normalizeStatus(oldStatus))) {
             if (task.getCreatedBy() != null && task.getAssigneeId() != null 
                 && !task.getCreatedBy().equals(task.getAssigneeId())) {
                 // Only prompt for rating if creator is different from assignee
@@ -266,7 +394,6 @@ public class TaskController {
         }
 
         // Track first response time - when assignee first updates the task
-        UUID userId = (UUID) auth.getPrincipal();
         if (task.getFirstResponseAt() == null && 
             task.getAssigneeId() != null && 
             task.getAssigneeId().equals(userId)) {
@@ -295,6 +422,10 @@ public class TaskController {
         }
 
         Task task = taskOpt.get();
+        UUID userId = (UUID) auth.getPrincipal();
+        if (!canManageTask(userId, auth, task)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
+        }
         task.setDescription(req.description());
         taskRepository.save(task);
         return ResponseEntity.ok(Map.of("success", true));
@@ -308,8 +439,13 @@ public class TaskController {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
 
-        if (!taskRepository.existsById(id)) {
+        var taskOpt = taskRepository.findById(id);
+        if (taskOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        if (!canManageTask(userId, auth, taskOpt.get())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
         // Delete related records first (cascading should handle this via FK, but being explicit)
@@ -333,8 +469,13 @@ public class TaskController {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
 
-        if (!taskRepository.existsById(taskId)) {
+        var taskOpt = taskRepository.findById(taskId);
+        if (taskOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        if (!canManageTask(userId, auth, taskOpt.get())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
         TaskSubtask subtask = new TaskSubtask();
@@ -366,6 +507,14 @@ public class TaskController {
         }
 
         TaskSubtask subtask = subtaskOpt.get();
+        var taskOpt = taskRepository.findById(subtask.getTaskId());
+        if (taskOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        if (!canManageTask(userId, auth, taskOpt.get())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
+        }
         subtask.setCompleted(req.completed());
         subtaskRepository.save(subtask);
 
@@ -384,8 +533,12 @@ public class TaskController {
         }
         UUID userId = (UUID) auth.getPrincipal();
 
-        if (!taskRepository.existsById(taskId)) {
+        var taskOpt = taskRepository.findById(taskId);
+        if (taskOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
+        }
+        if (!canViewTask(userId, auth, taskOpt.get())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
         TaskComment comment = new TaskComment();
@@ -418,8 +571,13 @@ public class TaskController {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
 
-        if (!taskRepository.existsById(taskId)) {
+        var taskOpt = taskRepository.findById(taskId);
+        if (taskOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        if (!canViewTask(userId, auth, taskOpt.get())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
         TaskAttachment attachment = new TaskAttachment();
@@ -563,9 +721,9 @@ public class TaskController {
             Task task = taskOpt.get();
             task.setProgress(progress);
             if (progress == 100) {
-                task.setStatus("Completed");
+                task.setStatus(Task.TaskStatus.DONE.name());
             } else if (progress > 0) {
-                task.setStatus("In Progress");
+                task.setStatus(Task.TaskStatus.IN_PROGRESS.name());
             }
             taskRepository.save(task);
         }
@@ -579,13 +737,17 @@ public class TaskController {
         response.put("assignee_id", task.getAssigneeId());
         response.put("organization", task.getOrganization());
         response.put("priority", task.getPriority());
-        response.put("status", task.getStatus());
+        response.put("status", normalizeStatus(task.getStatus()));
         response.put("due_date", task.getDueDate());
         response.put("due_time", task.getDueTime() != null ? task.getDueTime().toString() : null);
         response.put("tags", task.getTags() != null ? Arrays.asList(task.getTags()) : List.of());
         response.put("progress", task.getProgress());
         response.put("created_by", task.getCreatedBy());
         response.put("created_at", task.getCreatedAt());
+        response.put("blocked_by_id", task.getBlockedById());
+        response.put("is_blocked", task.isBlocked());
+        response.put("recurring_template_id", task.getRecurringTemplateId());
+        response.put("is_recurring_instance", task.getIsRecurringInstance());
         
         // Quality Rating fields
         response.put("quality_rating", task.getQualityRating());
@@ -663,6 +825,69 @@ public class TaskController {
         return summary;
     }
 
+    private String normalizeStatus(String status) {
+        if (status == null || status.isBlank()) return null;
+        String normalized = status.trim().toUpperCase(Locale.ROOT).replace(" ", "_");
+        return switch (normalized) {
+            case "PENDING", "TODO" -> Task.TaskStatus.TODO.name();
+            case "IN_PROGRESS", "IN-PROGRESS" -> Task.TaskStatus.IN_PROGRESS.name();
+            case "REVIEW" -> Task.TaskStatus.REVIEW.name();
+            case "COMPLETED", "DONE" -> Task.TaskStatus.DONE.name();
+            case "CANCELLED", "CANCELED" -> Task.TaskStatus.CANCELLED.name();
+            default -> normalized;
+        };
+    }
+
+    private boolean isValidTransition(String currentStatus, String nextStatus) {
+        if (nextStatus == null) return true;
+        Task.TaskStatus current = parseStatus(currentStatus);
+        Task.TaskStatus next = parseStatus(nextStatus);
+        if (next == null) return false;
+        if (current == null || current == next) return true;
+
+        return switch (current) {
+            case TODO -> next == Task.TaskStatus.IN_PROGRESS || next == Task.TaskStatus.CANCELLED;
+            case IN_PROGRESS -> next == Task.TaskStatus.REVIEW || next == Task.TaskStatus.DONE || next == Task.TaskStatus.CANCELLED;
+            case REVIEW -> next == Task.TaskStatus.DONE || next == Task.TaskStatus.IN_PROGRESS || next == Task.TaskStatus.CANCELLED;
+            case DONE -> next == Task.TaskStatus.IN_PROGRESS;
+            case CANCELLED -> next == Task.TaskStatus.TODO;
+        };
+    }
+
+    private Task.TaskStatus parseStatus(String status) {
+        String normalized = normalizeStatus(status);
+        if (normalized == null) return null;
+        try {
+            return Task.TaskStatus.valueOf(normalized);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private boolean canViewTask(UUID userId, Authentication auth, Task task) {
+        if (isAdmin(auth)) return true;
+        if (userId.equals(task.getAssigneeId()) || userId.equals(task.getCreatedBy())) {
+            return true;
+        }
+        Profile profile = profileRepository.findById(userId).orElse(null);
+        return profile != null && Boolean.TRUE.equals(profile.getIsTeamLead()) &&
+            profile.getDepartment() != null && profile.getDepartment().equals(task.getOrganization());
+    }
+
+    private boolean canManageTask(UUID userId, Authentication auth, Task task) {
+        if (isAdmin(auth)) return true;
+        if (userId.equals(task.getCreatedBy())) return true;
+        Profile profile = profileRepository.findById(userId).orElse(null);
+        return profile != null && Boolean.TRUE.equals(profile.getIsTeamLead()) &&
+            profile.getDepartment() != null && profile.getDepartment().equals(task.getOrganization());
+    }
+
+    private boolean isAdmin(Authentication auth) {
+        if (auth == null) return false;
+        return auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))
+            || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
+    }
+
     // ==================== REQUEST RECORDS ====================
 
     public record CreateTaskRequest(
@@ -674,6 +899,9 @@ public class TaskController {
             String dueDate,
             String dueTime, // HH:mm format
             List<String> tags,
+            Long blockedById,
+            String recurringTemplateId,
+            Boolean isRecurringInstance,
             List<SubtaskRequest> subtasks,
             List<AttachmentRequest> attachments
     ) {}
@@ -692,7 +920,10 @@ public class TaskController {
             String dueDate,
             String dueTime, // HH:mm format
             List<String> tags,
-            Integer progress
+            Integer progress,
+            Long blockedById,
+            String recurringTemplateId,
+            Boolean isRecurringInstance
     ) {}
 
     public record UpdateStatusRequest(String status, Integer progress) {}

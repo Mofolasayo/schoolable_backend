@@ -2,6 +2,8 @@ package com.schoolable.backend.notification;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,8 @@ import java.util.*;
  */
 @Service
 public class NotificationService {
+
+    private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
     @Autowired
     private DeviceTokenRepository deviceTokenRepository;
@@ -247,7 +251,7 @@ public class NotificationService {
 
             int responseCode = conn.getResponseCode();
             if (responseCode != 200) {
-                System.err.println("FCM notification failed with code: " + responseCode);
+                log.warn("FCM notification failed with code: {}", responseCode);
                 // Could mark token as invalid if 404
                 if (responseCode == 404) {
                     deviceTokenRepository.deactivateToken(token);
@@ -256,7 +260,7 @@ public class NotificationService {
 
             conn.disconnect();
         } catch (Exception e) {
-            System.err.println("Failed to send FCM notification: " + e.getMessage());
+            log.warn("Failed to send FCM notification: {}", e.getMessage());
         }
     }
 }

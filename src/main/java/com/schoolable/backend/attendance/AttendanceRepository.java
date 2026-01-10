@@ -38,5 +38,6 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Long> {
     // Count methods for performance calculations
     long countByUserIdAndCreatedAtAfter(UUID userId, OffsetDateTime after);
     long countByUserIdAndStatusAndCreatedAtAfter(UUID userId, String status, OffsetDateTime after);
-}
 
+    List<Attendance> findByRetentionUntilBefore(OffsetDateTime cutoff);
+}

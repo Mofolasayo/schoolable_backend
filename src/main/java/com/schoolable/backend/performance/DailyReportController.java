@@ -1,11 +1,7 @@
 package com.schoolable.backend.performance;
 
-import com.schoolable.backend.kpi.GeminiAiService;
-import com.schoolable.backend.kpi.IndividualKpi;
-import com.schoolable.backend.kpi.IndividualKpiRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,13 +32,7 @@ public class DailyReportController {
     private ProfileRepository profileRepository;
 
     @Autowired
-    private IndividualKpiRepository individualKpiRepository;
-
-    @Autowired
-    private GeminiAiService aiService;
-
-    @Autowired
-    private ObjectMapper objectMapper;
+    private DailyReportAiService dailyReportAiService;
 
     // ==================== MY REPORTS ====================
 
@@ -128,13 +118,7 @@ public class DailyReportController {
 
         report = dailyReportRepository.save(report);
 
-        // Trigger AI grading asynchronously (or sync for MVP)
-        try {
-            gradeReportWithAi(report, userId);
-        } catch (Exception e) {
-            System.err.println("AI grading failed: " + e.getMessage());
-            // Continue - report is saved, can grade later
-        }
+        dailyReportAiService.enqueueAiGrading(report.getId(), userId);
 
         return ResponseEntity.ok(Map.of(
             "success", true,
@@ -181,12 +165,7 @@ public class DailyReportController {
 
         report = dailyReportRepository.save(report);
 
-        // Re-grade with AI
-        try {
-            gradeReportWithAi(report, userId);
-        } catch (Exception e) {
-            System.err.println("AI re-grading failed: " + e.getMessage());
-        }
+        dailyReportAiService.enqueueAiGrading(report.getId(), userId);
 
         return ResponseEntity.ok(Map.of(
             "success", true,
@@ -395,74 +374,6 @@ public class DailyReportController {
 
     // ==================== HELPER METHODS ====================
 
-    private void gradeReportWithAi(DailyReport report, UUID employeeId) {
-        Profile employee = profileRepository.findById(employeeId).orElse(null);
-        String department = employee != null ? employee.getDepartment() : null;
-        String employeeName = employee != null ? employee.getFullName() : null;
-
-        // Get employee's individual KPIs for context
-        String quarter = getCurrentQuarter();
-        int year = LocalDate.now().getYear();
-        List<IndividualKpi> kpis = individualKpiRepository.findActiveByEmployeeAndPeriod(employeeId, quarter, year);
-
-        // Build KPI names for context
-        List<String> kpiNames = new ArrayList<>();
-        for (IndividualKpi kpi : kpis) {
-            kpiNames.add(kpi.getName() + " (Target: " + kpi.getTargetValue() + " " + 
-                (kpi.getTargetUnit() != null ? kpi.getTargetUnit() : "") + 
-                ", Weight: " + kpi.getWeight() + "%)");
-        }
-
-        try {
-            // Use the new grading method
-            GeminiAiService.DailyReportGradingResult result = aiService.gradeDailyReport(
-                employeeName,
-                department,
-                report.getTasksCompleted(),
-                report.getTasksInProgress(),
-                report.getBlockers(),
-                report.getPlannedForTomorrow(),
-                report.getAdditionalNotes(),
-                kpiNames
-            );
-
-            // Update report with AI results
-            if (result.overallScore != null) {
-                report.setAiScore(result.overallScore);
-            }
-            if (result.feedback != null) {
-                report.setAiFeedback(result.feedback);
-            }
-            if (result.kpiAlignmentScore != null) {
-                report.setKpiAlignmentScore(result.kpiAlignmentScore);
-            }
-            if (result.suggestionsForTomorrow != null && !result.suggestionsForTomorrow.isEmpty()) {
-                // Store suggestions as JSON array string
-                try {
-                    String suggestionsJson = objectMapper.writeValueAsString(result.suggestionsForTomorrow);
-                    report.setAiSuggestions(suggestionsJson);
-                } catch (Exception jsonEx) {
-                    System.err.println("Error serializing suggestions: " + jsonEx.getMessage());
-                }
-            }
-
-            report.setAiGradedAt(OffsetDateTime.now());
-            dailyReportRepository.save(report);
-
-        } catch (Exception e) {
-            System.err.println("AI grading error: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private String getCurrentQuarter() {
-        int month = LocalDate.now().getMonthValue();
-        if (month <= 3) return "Q1";
-        if (month <= 6) return "Q2";
-        if (month <= 9) return "Q3";
-        return "Q4";
-    }
-
     private Map<String, Object> toDto(DailyReport r) {
         Map<String, Object> dto = new LinkedHashMap<>();
         dto.put("id", r.getId());
@@ -479,6 +390,11 @@ public class DailyReportController {
         dto.put("aiFeedback", r.getAiFeedback());
         dto.put("aiGradedAt", r.getAiGradedAt());
         dto.put("kpiAlignmentScore", r.getKpiAlignmentScore());
+        dto.put("aiJobId", r.getAiJobId());
+        dto.put("aiRequestId", r.getAiRequestId());
+        dto.put("aiPromptVersion", r.getAiPromptVersion());
+        dto.put("aiModelUsed", r.getAiModelUsed());
+        dto.put("aiStatus", r.getAiStatus());
         dto.put("status", r.getStatus());
         dto.put("reviewedBy", r.getReviewedBy());
         dto.put("reviewedAt", r.getReviewedAt());

@@ -33,6 +33,20 @@ dependencies {
     // Cloudinary for file storage
     implementation 'com.cloudinary:cloudinary-http44:1.36.0'
 
+    // Redis caching
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+
+    // Rate limiting with Bucket4j
+    implementation 'com.bucket4j:bucket4j-core:8.7.0'
+
+    // WebClient for async HTTP calls (AI integration)
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+
+    // AWS Rekognition for face match
+    implementation platform('software.amazon.awssdk:bom:2.25.61')
+    implementation 'software.amazon.awssdk:rekognition'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 

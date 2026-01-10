@@ -2,6 +2,8 @@ package com.schoolable.backend.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolable.backend.auth.JwtService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.socket.*;
@@ -22,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Configuration
 @EnableWebSocket
 public class NativeWebSocketConfig implements WebSocketConfigurer {
+
+    private static final Logger log = LoggerFactory.getLogger(NativeWebSocketConfig.class);
 
     private final JwtService jwtService;
     private final SimpMessagingTemplate messagingTemplate;
@@ -49,14 +53,14 @@ public class NativeWebSocketConfig implements WebSocketConfigurer {
         
         @Override
         public void afterConnectionEstablished(WebSocketSession session) {
-            System.out.println("🔌 Native WebSocket connected: " + session.getId());
+            log.info("Native WebSocket connected: {}", session.getId());
             sessions.put(session.getId(), session);
         }
 
         @Override
         protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
             String payload = message.getPayload();
-            System.out.println("📥 Native WS message: " + payload);
+            log.debug("Native WS message: {}", payload);
 
             try {
                 @SuppressWarnings("unchecked")
@@ -91,14 +95,14 @@ public class NativeWebSocketConfig implements WebSocketConfigurer {
                         handleUserMessage(session, type, data);
                 }
             } catch (Exception e) {
-                System.err.println("❌ Error handling native WS message: " + e.getMessage());
+                log.warn("Error handling native WS message: {}", e.getMessage());
                 sendError(session, "Invalid message format");
             }
         }
 
         @Override
         public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-            System.out.println("🔌 Native WebSocket closed: " + session.getId());
+            log.info("Native WebSocket closed: {}", session.getId());
             authenticatedSessions.remove(session.getId());
             sessionSubscriptions.remove(session.getId());
             sessions.remove(session.getId());
@@ -122,7 +126,7 @@ public class NativeWebSocketConfig implements WebSocketConfigurer {
                     sessionSubscriptions.get(session.getId()).add("/topic/announcements");
                     
                     sendMessage(session, Map.of("type", "AUTH_SUCCESS", "userId", userId.toString()));
-                    System.out.println("✅ Native WS authenticated: " + userId);
+                    log.info("Native WS authenticated: {}", userId);
                 } else {
                     sendMessage(session, Map.of("type", "AUTH_FAILED", "error", "Invalid token"));
                 }
@@ -170,16 +174,10 @@ public class NativeWebSocketConfig implements WebSocketConfigurer {
             // Route based on type
             switch (type) {
                 case "CHAT_MESSAGE":
-                    String channelId = (String) data.get("channelId");
-                    if (channelId != null) {
-                        messagingTemplate.convertAndSend("/app/chat/" + channelId, data);
-                    }
+                    log.debug("Chat messaging disabled. Ignoring native WS chat message.");
                     break;
                 case "TYPING":
-                    String typingChannelId = (String) data.get("channelId");
-                    if (typingChannelId != null) {
-                        messagingTemplate.convertAndSend("/topic/channel/" + typingChannelId + "/typing", data);
-                    }
+                    log.debug("Chat messaging disabled. Ignoring native WS typing update.");
                     break;
             }
         }
@@ -203,7 +201,7 @@ public class NativeWebSocketConfig implements WebSocketConfigurer {
         try {
             jsonMessage = objectMapper.writeValueAsString(message);
         } catch (Exception e) {
-            System.err.println("Failed to serialize broadcast message: " + e.getMessage());
+            log.warn("Failed to serialize broadcast message: {}", e.getMessage());
             return;
         }
 
@@ -217,7 +215,7 @@ public class NativeWebSocketConfig implements WebSocketConfigurer {
                 try {
                     session.sendMessage(new TextMessage(jsonMessage));
                 } catch (Exception e) {
-                    System.err.println("Failed to send message to session " + sessionId + ": " + e.getMessage());
+                    log.warn("Failed to send message to session {}: {}", sessionId, e.getMessage());
                 }
             }
         }

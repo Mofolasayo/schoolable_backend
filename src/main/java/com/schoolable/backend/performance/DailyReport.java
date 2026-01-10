@@ -68,6 +68,21 @@ public class DailyReport {
     @Column(name = "ai_suggestions", columnDefinition = "TEXT")
     private String aiSuggestions;  // JSON array of AI-generated priorities for next day
 
+    @Column(name = "ai_job_id")
+    private UUID aiJobId;
+
+    @Column(name = "ai_request_id")
+    private UUID aiRequestId;
+
+    @Column(name = "ai_prompt_version", length = 20)
+    private String aiPromptVersion;
+
+    @Column(name = "ai_model_used", length = 100)
+    private String aiModelUsed;
+
+    @Column(name = "ai_status", length = 20)
+    private String aiStatus = "PENDING";
+
     // Status
     @Column(length = 20)
     private String status = "submitted";  // submitted, reviewed, flagged
@@ -168,6 +183,21 @@ public class DailyReport {
 
     public String getAiSuggestions() { return aiSuggestions; }
     public void setAiSuggestions(String aiSuggestions) { this.aiSuggestions = aiSuggestions; }
+
+    public UUID getAiJobId() { return aiJobId; }
+    public void setAiJobId(UUID aiJobId) { this.aiJobId = aiJobId; }
+
+    public UUID getAiRequestId() { return aiRequestId; }
+    public void setAiRequestId(UUID aiRequestId) { this.aiRequestId = aiRequestId; }
+
+    public String getAiPromptVersion() { return aiPromptVersion; }
+    public void setAiPromptVersion(String aiPromptVersion) { this.aiPromptVersion = aiPromptVersion; }
+
+    public String getAiModelUsed() { return aiModelUsed; }
+    public void setAiModelUsed(String aiModelUsed) { this.aiModelUsed = aiModelUsed; }
+
+    public String getAiStatus() { return aiStatus; }
+    public void setAiStatus(String aiStatus) { this.aiStatus = aiStatus; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

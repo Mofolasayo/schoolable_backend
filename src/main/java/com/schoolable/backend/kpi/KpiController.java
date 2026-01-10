@@ -1,10 +1,12 @@
 package com.schoolable.backend.kpi;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -16,7 +18,6 @@ import java.util.*;
  */
 @RestController
 @RequestMapping("/api/kpi")
-@CrossOrigin(origins = "*")
 public class KpiController {
 
     @Autowired
@@ -32,7 +33,19 @@ public class KpiController {
     private TeamQuarterlyScoreRepository scoreRepository;
 
     @Autowired
+    private TeamKpiRepository teamKpiRepository;
+
+    @Autowired
     private PersonalInsightsService personalInsightsService;
+
+    @Autowired
+    private KpiLockService kpiLockService;
+
+    @Autowired
+    private KpiChangeRequestRepository changeRequestRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
 
     // ==================== KPI MANAGEMENT ====================
@@ -77,6 +90,34 @@ public class KpiController {
 
         try {
             UUID userId = getUserId(auth);
+            String quarter = request.quarter != null ? request.quarter : kpiService.getCurrentQuarter();
+            Integer year = request.year != null ? request.year : LocalDate.now().getYear();
+            Profile profile = profileRepository.findById(userId).orElse(null);
+            String department = profile != null ? profile.getDepartment() : null;
+
+            if (kpiLockService.isLocked("team", quarter, year, userId, department) && !isAdmin(auth)) {
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("teamLeadId", userId.toString());
+                payload.put("department", department);
+                payload.put("name", request.name);
+                payload.put("description", request.description);
+                payload.put("targetValue", request.targetValue);
+                payload.put("targetUnit", request.targetUnit);
+                payload.put("weight", request.weight);
+                payload.put("quarter", quarter);
+                payload.put("year", year);
+                if (request.progressSource != null) payload.put("progressSource", request.progressSource);
+                if (request.progressConfig != null) payload.put("progressConfig", request.progressConfig);
+                if (request.autoProgressEnabled != null) payload.put("autoProgressEnabled", request.autoProgressEnabled);
+
+                return queueChangeRequest(
+                    "CREATE",
+                    null,
+                    payload,
+                    userId
+                );
+            }
+
             TeamKpi kpi = kpiService.createKpi(userId, request);
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -103,6 +144,29 @@ public class KpiController {
 
         try {
             UUID userId = getUserId(auth);
+            TeamKpi existing = teamKpiRepository.findById(kpiId).orElse(null);
+            if (existing == null) {
+                return ResponseEntity.status(404).body(Map.of(
+                    "success", false,
+                    "error", "KPI not found"
+                ));
+            }
+
+            if (kpiLockService.isLocked("team", existing.getQuarter(), existing.getYear(), existing.getTeamLeadId(), existing.getDepartment()) && !isAdmin(auth)) {
+                Map<String, Object> changes = new HashMap<>();
+                if (request.name != null) changes.put("name", request.name);
+                if (request.description != null) changes.put("description", request.description);
+                if (request.targetValue != null) changes.put("targetValue", request.targetValue);
+                if (request.targetUnit != null) changes.put("targetUnit", request.targetUnit);
+                if (request.weight != null) changes.put("weight", request.weight);
+                if (request.isActive != null) changes.put("isActive", request.isActive);
+                if (request.progressSource != null) changes.put("progressSource", request.progressSource);
+                if (request.progressConfig != null) changes.put("progressConfig", request.progressConfig);
+                if (request.autoProgressEnabled != null) changes.put("autoProgressEnabled", request.autoProgressEnabled);
+
+                return queueChangeRequest("UPDATE", kpiId, changes, userId);
+            }
+
             TeamKpi kpi = kpiService.updateKpi(kpiId, userId, request);
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -128,6 +192,18 @@ public class KpiController {
 
         try {
             UUID userId = getUserId(auth);
+            TeamKpi existing = teamKpiRepository.findById(kpiId).orElse(null);
+            if (existing == null) {
+                return ResponseEntity.status(404).body(Map.of(
+                    "success", false,
+                    "error", "KPI not found"
+                ));
+            }
+
+            if (kpiLockService.isLocked("team", existing.getQuarter(), existing.getYear(), existing.getTeamLeadId(), existing.getDepartment()) && !isAdmin(auth)) {
+                return queueChangeRequest("DELETE", kpiId, Map.of("kpiId", kpiId.toString()), userId);
+            }
+
             kpiService.deleteKpi(kpiId, userId);
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -215,12 +291,14 @@ public class KpiController {
             if (weekNumber == null) weekNumber = kpiService.getCurrentWeek();
             if (year == null) year = LocalDate.now().getYear();
 
-            AiInsight insight = kpiService.generateWeeklyInsight(userId, weekNumber, year);
+            var job = kpiService.enqueueWeeklyInsight(userId, weekNumber, year, userId);
 
-            return ResponseEntity.ok(Map.of(
+            return ResponseEntity.accepted().body(Map.of(
                 "success", true,
-                "message", "AI insight generated successfully",
-                "insight", formatInsight(insight)
+                "message", "AI insight queued",
+                "jobId", job.getId(),
+                "weekNumber", weekNumber,
+                "year", year
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -302,12 +380,14 @@ public class KpiController {
             if (quarter == null) quarter = kpiService.getCurrentQuarter();
             if (year == null) year = LocalDate.now().getYear();
 
-            TeamQuarterlyScore score = kpiService.calculateQuarterlyScore(userId, quarter, year);
+            var job = kpiService.enqueueQuarterlyScore(userId, quarter, year, userId);
 
-            return ResponseEntity.ok(Map.of(
+            return ResponseEntity.accepted().body(Map.of(
                 "success", true,
-                "message", "Team score calculated",
-                "score", formatScore(score)
+                "message", "Team score calculation queued",
+                "jobId", job.getId(),
+                "quarter", quarter,
+                "year", year
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -431,7 +511,24 @@ public class KpiController {
             Authentication auth,
             @PathVariable UUID employeeId) {
         try {
-            // TODO: Add authorization check - only TL can view their team's insights
+            UUID requesterId = getUserId(auth);
+            Profile requester = profileRepository.findById(requesterId).orElse(null);
+            if (requester == null) {
+                return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+            }
+
+            if (!isAdmin(auth) && !Boolean.TRUE.equals(requester.getIsTeamLead())) {
+                return ResponseEntity.status(403).body(Map.of("error", "Team lead or admin access required"));
+            }
+
+            if (!isAdmin(auth)) {
+                Profile employee = profileRepository.findById(employeeId).orElse(null);
+                if (employee == null || requester.getDepartment() == null ||
+                    !requester.getDepartment().equals(employee.getDepartment())) {
+                    return ResponseEntity.status(403).body(Map.of("error", "Access restricted to your department"));
+                }
+            }
+
             Map<String, Object> insights = personalInsightsService.generatePersonalInsights(employeeId);
             return ResponseEntity.ok(insights);
         } catch (Exception e) {
@@ -452,6 +549,35 @@ public class KpiController {
         return (UUID) auth.getPrincipal();
     }
 
+    private ResponseEntity<?> queueChangeRequest(String requestType, UUID kpiId, Map<String, Object> payload, UUID requestedBy) {
+        try {
+            KpiChangeRequest changeRequest = new KpiChangeRequest();
+            changeRequest.setKpiType("team");
+            changeRequest.setRequestType(requestType);
+            changeRequest.setKpiId(kpiId);
+            changeRequest.setRequestedBy(requestedBy);
+            changeRequest.setPayload(objectMapper.writeValueAsString(payload));
+            changeRequestRepository.save(changeRequest);
+
+            return ResponseEntity.accepted().body(Map.of(
+                "success", true,
+                "status", "PENDING",
+                "changeRequestId", changeRequest.getId()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", "Failed to queue change request"
+            ));
+        }
+    }
+
+    private boolean isAdmin(Authentication auth) {
+        if (auth == null) return false;
+        return auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))
+            || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
+    }
+
     private Map<String, Object> formatInsight(AiInsight insight) {
         Map<String, Object> formatted = new HashMap<>();
         formatted.put("id", insight.getId());
@@ -465,6 +591,11 @@ public class KpiController {
         formatted.put("riskAlerts", insight.getRiskAlerts());
         formatted.put("generatedAt", insight.getGeneratedAt());
         formatted.put("department", insight.getDepartment());
+        formatted.put("promptVersion", insight.getPromptVersion());
+        formatted.put("modelUsed", insight.getModelUsed());
+        formatted.put("aiRequestId", insight.getAiRequestId());
+        formatted.put("aiJobId", insight.getAiJobId());
+        formatted.put("generationStatus", insight.getGenerationStatus());
         return formatted;
     }
 
@@ -479,6 +610,9 @@ public class KpiController {
         formatted.put("overallTeamScore", score.getOverallTeamScore());
         formatted.put("grade", score.getGrade());
         formatted.put("aiSummary", score.getAiSummary());
+        formatted.put("promptVersion", score.getPromptVersion());
+        formatted.put("modelUsed", score.getModelUsed());
+        formatted.put("aiRequestId", score.getAiRequestId());
         return formatted;
     }
 }

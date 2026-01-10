@@ -5,6 +5,9 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -32,6 +35,10 @@ import java.util.UUID;
 public class SecurityConfig {
 
     private final JwtService jwtService;
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
+
+    @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:3001}")
+    private String corsAllowedOrigins;
 
     public SecurityConfig(JwtService jwtService) {
         this.jwtService = jwtService;
@@ -44,21 +51,19 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(eh -> eh
                         .authenticationEntryPoint((req, res, ex) -> {
-                            System.out.println("❌ UNAUTHORIZED REQUEST to " + req.getRequestURI());
-                            System.out.println("   Method: " + req.getMethod());
-                            System.out.println("   Exception: " + ex.getMessage());
-                            System.out.println("   Headers: Authorization=" + (req.getHeader("Authorization") != null ? "Present" : "Missing"));
+                            log.warn("Unauthorized request to {} {} (auth header present: {})",
+                                req.getMethod(), req.getRequestURI(), req.getHeader("Authorization") != null);
                             
                             res.setStatus(HttpStatus.UNAUTHORIZED.value());
                             res.setContentType("application/json");
-                            res.getWriter().write("{\"error\":\"Unauthorized: " + ex.getMessage() + "\"}");
+                            res.getWriter().write("{\"error\":{\"code\":\"UNAUTHORIZED\",\"message\":\"Unauthorized\"}}");
                         })
                         .accessDeniedHandler((req, res, ex) -> {
-                            System.out.println("🚫 ACCESS DENIED to " + req.getRequestURI());
+                            log.warn("Access denied to {}", req.getRequestURI());
                             
                             res.setStatus(HttpStatus.FORBIDDEN.value());
                             res.setContentType("application/json");
-                            res.getWriter().write("{\"error\":\"Forbidden\"}");
+                            res.getWriter().write("{\"error\":{\"code\":\"FORBIDDEN\",\"message\":\"Forbidden\"}}");
                         })
                 )
                 .authorizeHttpRequests(auth -> auth
@@ -84,7 +89,11 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList("*"));
+        List<String> allowedOrigins = Arrays.stream(corsAllowedOrigins.split(","))
+            .map(String::trim)
+            .filter(origin -> !origin.isBlank())
+            .toList();
+        configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin"));
         configuration.setExposedHeaders(Arrays.asList("Authorization"));
@@ -102,6 +111,7 @@ public class SecurityConfig {
 
     static class JwtAuthFilter extends OncePerRequestFilter {
         private final JwtService jwtService;
+        private static final Logger log = LoggerFactory.getLogger(JwtAuthFilter.class);
 
         JwtAuthFilter(JwtService jwtService) {
             this.jwtService = jwtService;
@@ -115,8 +125,7 @@ public class SecurityConfig {
             
             // Only log important endpoints to reduce noise
             if (uri.contains("/tasks") || uri.contains("/profile")) {
-                System.out.println("🔐 JwtAuthFilter: " + method + " " + uri);
-                System.out.println("   Authorization header: " + (authHeader != null ? "Present (" + authHeader.length() + " chars)" : "MISSING"));
+                log.debug("JwtAuthFilter: {} {} (auth header present: {})", method, uri, authHeader != null);
             }
             
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -126,7 +135,7 @@ public class SecurityConfig {
                     UUID userId = UUID.fromString(claims.getSubject());
                     String role = claims.get("role", String.class);
                     if (uri.contains("/tasks") || uri.contains("/profile")) {
-                        System.out.println("   ✅ JWT parsed successfully: userId=" + userId);
+                        log.debug("JWT parsed successfully for userId={}", userId);
                     }
                     var auth = new UsernamePasswordAuthenticationToken(
                             userId,
@@ -135,12 +144,12 @@ public class SecurityConfig {
                     );
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 } catch (Exception e) {
-                    System.out.println("   ❌ JWT parse FAILED: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                    log.warn("JWT parse failed: {} {}", e.getClass().getSimpleName(), e.getMessage());
                     // Don't return here, let the entry point handle it for meaningful 401s
                 }
             } else {
                 if (uri.contains("/tasks") || uri.contains("/profile")) {
-                    System.out.println("   ⚠️ No Bearer token in request");
+                    log.debug("No Bearer token in request");
                 }
             }
             filterChain.doFilter(request, response);

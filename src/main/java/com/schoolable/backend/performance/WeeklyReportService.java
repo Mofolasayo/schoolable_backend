@@ -3,6 +3,8 @@ package com.schoolable.backend.performance;
 import com.schoolable.backend.kpi.KpiAnalysisService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +16,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class WeeklyReportService {
+
+    private static final Logger log = LoggerFactory.getLogger(WeeklyReportService.class);
 
     private final WeeklyReportRepository weeklyReportRepository;
     private final ProfileRepository profileRepository;
@@ -119,7 +123,7 @@ public class WeeklyReportService {
             try {
                 responses.add(submitReport(teamLeadId, singleRequest));
             } catch (Exception e) {
-                System.err.println("Failed to submit report for employee " + memberReport.getEmployeeId() + ": " + e.getMessage());
+                log.warn("Failed to submit report for employee {}: {}", memberReport.getEmployeeId(), e.getMessage());
             }
         }
 
@@ -208,7 +212,7 @@ public class WeeklyReportService {
                 Profile employee = profileRepository.findById(employeeId).orElse(null);
                 responses.add(mapToResponse(saved, employee, teamLead));
             } catch (Exception e) {
-                System.err.println("Failed to submit simplified report for employee " + rating.getEmployeeId() + ": " + e.getMessage());
+                log.warn("Failed to submit simplified report for employee {}: {}", rating.getEmployeeId(), e.getMessage());
             }
         }
 
@@ -217,7 +221,7 @@ public class WeeklyReportService {
             String quarter = kpiAnalysisService.getCurrentQuarter();
             kpiAnalysisService.calculateQuarterlyScore(teamLeadId, quarter, request.getYear());
         } catch (Exception e) {
-            System.err.println("Failed to auto-generate quarterly score: " + e.getMessage());
+            log.warn("Failed to auto-generate quarterly score: {}", e.getMessage());
         }
 
         return responses;

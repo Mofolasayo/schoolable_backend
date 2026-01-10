@@ -2,6 +2,8 @@ package com.schoolable.backend.performance;
 
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,8 @@ import java.util.UUID;
  */
 @Service
 public class DailyAuraService {
+
+    private static final Logger log = LoggerFactory.getLogger(DailyAuraService.class);
 
     @Autowired
     private DailyAuraSnapshotRepository snapshotRepository;
@@ -45,7 +49,7 @@ public class DailyAuraService {
     @Scheduled(cron = "0 59 23 * * *")
     @Transactional
     public void calculateDailyAura() {
-        System.out.println("Starting daily Aura calculation at " + LocalDate.now());
+        log.info("Starting daily Aura calculation at {}", LocalDate.now());
 
         List<Profile> activeEmployees = profileRepository.findByStatusAndProfileCompletedAtIsNotNull("active");
 
@@ -57,12 +61,12 @@ public class DailyAuraService {
                 calculateAndStoreForEmployee(employee);
                 processed++;
             } catch (Exception e) {
-                System.err.println("Error calculating daily Aura for " + employee.getId() + ": " + e.getMessage());
+                log.warn("Error calculating daily Aura for {}: {}", employee.getId(), e.getMessage());
                 errors++;
             }
         }
 
-        System.out.println("Daily Aura calculation complete: " + processed + " processed, " + errors + " errors");
+        log.info("Daily Aura calculation complete: {} processed, {} errors", processed, errors);
 
         // After all calculations, check for trends
         checkWeeklyTrends();
@@ -115,7 +119,7 @@ public class DailyAuraService {
             }
 
         } catch (Exception e) {
-            System.err.println("Error in lightweight Aura calc: " + e.getMessage());
+            log.warn("Error in lightweight Aura calc: {}", e.getMessage());
             // Default to 75 if calculation fails
             snapshot.setDailyAura(BigDecimal.valueOf(75));
         }

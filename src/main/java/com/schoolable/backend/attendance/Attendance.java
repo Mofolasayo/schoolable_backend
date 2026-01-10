@@ -2,6 +2,7 @@ package com.schoolable.backend.attendance;
 
 import jakarta.persistence.*;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -32,6 +33,21 @@ public class Attendance {
     @Column(name = "photo_url")
     private String photoUrl;
 
+    @Column(name = "is_remote")
+    private Boolean isRemote = false;
+
+    @Column(name = "office_location_id")
+    private UUID officeLocationId;
+
+    @Column(name = "schedule_id")
+    private UUID scheduleId;
+
+    @Column(name = "expected_check_in")
+    private LocalTime expectedCheckIn;
+
+    @Column(name = "expected_check_out")
+    private LocalTime expectedCheckOut;
+
     // Enhanced location fields
     private Double latitude;
     private Double longitude;
@@ -45,6 +61,24 @@ public class Attendance {
     @Column(name = "verification_status")
     private String verificationStatus; // pending, verified, failed
 
+    @Column(name = "is_within_geofence")
+    private Boolean isWithinGeofence;
+
+    @Column(name = "distance_meters")
+    private Double distanceMeters;
+
+    @Column(name = "liveness_score")
+    private Double livenessScore;
+
+    @Column(name = "liveness_type")
+    private String livenessType;
+
+    @Column(name = "liveness_passed")
+    private Boolean livenessPassed;
+
+    @Column(name = "face_match_provider")
+    private String faceMatchProvider;
+
     @Column(name = "device_info")
     private String deviceInfo;
 
@@ -53,6 +87,9 @@ public class Attendance {
 
     @Column(name = "created_at")
     private OffsetDateTime createdAt;
+
+    @Column(name = "retention_until")
+    private OffsetDateTime retentionUntil;
 
     // Getters and Setters
     public Long getId() { return id; }
@@ -82,6 +119,21 @@ public class Attendance {
     public String getPhotoUrl() { return photoUrl; }
     public void setPhotoUrl(String photoUrl) { this.photoUrl = photoUrl; }
 
+    public Boolean getIsRemote() { return isRemote; }
+    public void setIsRemote(Boolean isRemote) { this.isRemote = isRemote; }
+
+    public UUID getOfficeLocationId() { return officeLocationId; }
+    public void setOfficeLocationId(UUID officeLocationId) { this.officeLocationId = officeLocationId; }
+
+    public UUID getScheduleId() { return scheduleId; }
+    public void setScheduleId(UUID scheduleId) { this.scheduleId = scheduleId; }
+
+    public LocalTime getExpectedCheckIn() { return expectedCheckIn; }
+    public void setExpectedCheckIn(LocalTime expectedCheckIn) { this.expectedCheckIn = expectedCheckIn; }
+
+    public LocalTime getExpectedCheckOut() { return expectedCheckOut; }
+    public void setExpectedCheckOut(LocalTime expectedCheckOut) { this.expectedCheckOut = expectedCheckOut; }
+
     public Double getLatitude() { return latitude; }
     public void setLatitude(Double latitude) { this.latitude = latitude; }
 
@@ -100,6 +152,24 @@ public class Attendance {
     public String getVerificationStatus() { return verificationStatus; }
     public void setVerificationStatus(String verificationStatus) { this.verificationStatus = verificationStatus; }
 
+    public Boolean getIsWithinGeofence() { return isWithinGeofence; }
+    public void setIsWithinGeofence(Boolean isWithinGeofence) { this.isWithinGeofence = isWithinGeofence; }
+
+    public Double getDistanceMeters() { return distanceMeters; }
+    public void setDistanceMeters(Double distanceMeters) { this.distanceMeters = distanceMeters; }
+
+    public Double getLivenessScore() { return livenessScore; }
+    public void setLivenessScore(Double livenessScore) { this.livenessScore = livenessScore; }
+
+    public String getLivenessType() { return livenessType; }
+    public void setLivenessType(String livenessType) { this.livenessType = livenessType; }
+
+    public Boolean getLivenessPassed() { return livenessPassed; }
+    public void setLivenessPassed(Boolean livenessPassed) { this.livenessPassed = livenessPassed; }
+
+    public String getFaceMatchProvider() { return faceMatchProvider; }
+    public void setFaceMatchProvider(String faceMatchProvider) { this.faceMatchProvider = faceMatchProvider; }
+
     public String getDeviceInfo() { return deviceInfo; }
     public void setDeviceInfo(String deviceInfo) { this.deviceInfo = deviceInfo; }
 
@@ -108,4 +178,7 @@ public class Attendance {
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
+
+    public OffsetDateTime getRetentionUntil() { return retentionUntil; }
+    public void setRetentionUntil(OffsetDateTime retentionUntil) { this.retentionUntil = retentionUntil; }
 }

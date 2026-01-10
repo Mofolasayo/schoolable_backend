@@ -2,6 +2,8 @@ package com.schoolable.backend.performance;
 
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +16,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class PerformanceReviewService {
+
+    private static final Logger log = LoggerFactory.getLogger(PerformanceReviewService.class);
 
     private final PerformanceReviewRepository reviewRepository;
     private final ProfileRepository profileRepository;
@@ -134,7 +138,7 @@ public class PerformanceReviewService {
                 responses.add(submitAssessment(teamLeadId, singleRequest));
             } catch (Exception e) {
                 // Log error but continue with other assessments
-                System.err.println("Failed to process assessment for employee " + assessment.getEmployeeId() + ": " + e.getMessage());
+                log.warn("Failed to process assessment for employee {}: {}", assessment.getEmployeeId(), e.getMessage());
             }
         }
 

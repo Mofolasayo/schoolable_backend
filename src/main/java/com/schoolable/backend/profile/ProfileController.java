@@ -3,6 +3,8 @@ package com.schoolable.backend.profile;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -31,6 +33,8 @@ import java.util.UUID;
 @RequestMapping("/profile")
 @Tag(name = "Profile")
 public class ProfileController {
+
+    private static final Logger log = LoggerFactory.getLogger(ProfileController.class);
 
     private final ProfileRepository profileRepository;
     private final StorageService storageService;
@@ -137,25 +141,22 @@ public class ProfileController {
     @Operation(summary = "Complete profile after login")
     @PostMapping("/complete")
     public ResponseEntity<?> completeProfile(Authentication auth, @RequestBody CompleteProfileRequest req) {
-        System.out.println("📋 completeProfile endpoint called");
-        System.out.println("   Request body: " + req);
-        System.out.println("   Authentication object: " + (auth != null ? "Present" : "NULL"));
+        log.debug("completeProfile called with authPresent={}", auth != null);
         if (auth != null) {
-            System.out.println("   Principal: " + auth.getPrincipal());
-            System.out.println("   Authorities: " + auth.getAuthorities());
+            log.debug("completeProfile principal={} authorities={}", auth.getPrincipal(), auth.getAuthorities());
         }
         
         try {
             if (auth == null || auth.getPrincipal() == null) {
-                System.out.println("   ❌ Returning 401: missing authentication");
+                log.warn("completeProfile unauthenticated");
                 return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
             }
             UUID userId = (UUID) auth.getPrincipal();
-            System.out.println("   ✅ User ID: " + userId);
+            log.debug("completeProfile userId={}", userId);
             
             var profileOpt = profileRepository.findById(userId);
             if (profileOpt.isEmpty()) {
-                System.out.println("   ❌ Profile not found for userId: " + userId);
+                log.warn("completeProfile profile not found for userId={}", userId);
                 return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
             }
             var p = profileOpt.get();
@@ -169,12 +170,12 @@ public class ProfileController {
                 p.setJobTitle(req.role());
             }
             if (req.dateJoined() != null && !req.dateJoined().isEmpty()) {
-                System.out.println("   Parsing dateJoined: " + req.dateJoined());
+                log.debug("completeProfile parsing dateJoined={}", req.dateJoined());
                 p.setDateJoined(parseFlexibleDateTime(req.dateJoined()));
             }
             p.setGender(req.gender());
             if (req.dateOfBirth() != null && !req.dateOfBirth().isEmpty()) {
-                System.out.println("   Parsing dateOfBirth: " + req.dateOfBirth());
+                log.debug("completeProfile parsing dateOfBirth={}", req.dateOfBirth());
                 p.setDateOfBirth(Date.valueOf(req.dateOfBirth()));
             }
             p.setAddress(req.address());
@@ -207,12 +208,11 @@ public class ProfileController {
             p.setUpdatedAt(OffsetDateTime.now());
 
             profileRepository.save(p);
-            System.out.println("   ✅ Profile saved successfully");
+            log.info("Profile completed for userId={}", userId);
 
             return ResponseEntity.ok(buildProfileResponse(p));
         } catch (Exception e) {
-            System.out.println("   ❌ ERROR in completeProfile: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-            e.printStackTrace();
+            log.error("Error completing profile: {}", e.getMessage(), e);
             return ResponseEntity.status(500).body(Map.of("error", "Failed to complete profile: " + e.getMessage()));
         }
     }

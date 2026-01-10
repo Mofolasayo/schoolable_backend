@@ -81,4 +81,43 @@ public interface IndividualKpiRepository extends JpaRepository<IndividualKpi, UU
         @Param("quarter") String quarter,
         @Param("year") Integer year
     );
+
+    // ============ APPROVAL WORKFLOW QUERIES ============
+    
+    /**
+     * Find KPIs by approval status
+     */
+    List<IndividualKpi> findByApprovalStatus(IndividualKpi.ApprovalStatus status);
+
+    /**
+     * Find KPIs by approval status and department
+     */
+    List<IndividualKpi> findByApprovalStatusAndDepartment(
+        IndividualKpi.ApprovalStatus status, String department);
+
+    /**
+     * Count KPIs by approval status
+     */
+    long countByApprovalStatus(IndividualKpi.ApprovalStatus status);
+
+    /**
+     * Find pending KPIs for a specific team lead's employees
+     */
+    @Query("SELECT k FROM IndividualKpi k WHERE k.setById = :setById " +
+           "AND k.approvalStatus = 'PENDING_APPROVAL' ORDER BY k.submittedAt DESC")
+    List<IndividualKpi> findPendingByTeamLead(@Param("setById") UUID setById);
+
+    // ============ CASCADING QUERIES ============
+
+    /**
+     * Find child KPIs for a parent
+     */
+    List<IndividualKpi> findByParentKpiIdOrderByEmployeeId(UUID parentKpiId);
+
+    /**
+     * Find KPIs by cascade level
+     */
+    List<IndividualKpi> findByCascadeLevelOrderByCreatedAtDesc(String cascadeLevel);
+
+    List<IndividualKpi> findByAutoProgressEnabledTrueAndQuarterAndYear(String quarter, Integer year);
 }

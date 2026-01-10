@@ -1,10 +1,7 @@
 package com.schoolable.backend.websocket;
 
-import com.schoolable.backend.messaging.ChannelMemberRepository;
-import com.schoolable.backend.messaging.Message;
-import com.schoolable.backend.messaging.MessageRepository;
-import com.schoolable.backend.profile.Profile;
-import com.schoolable.backend.profile.ProfileRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -17,34 +14,23 @@ import java.security.Principal;
 import java.util.*;
 
 /**
- * WebSocket message controller for real-time chat functionality.
- * 
- * Message Flow:
- * 1. Client sends message to: /app/chat/{channelId}
- * 2. Server saves to DB and broadcasts to: /topic/channel/{channelId}
- * 3. All subscribers to that channel receive the message
+ * WebSocket controller for realtime notifications (tasks/announcements).
+ * Chat endpoints are kept for compatibility but disabled in production.
  */
 @Controller
 public class WebSocketMessageController {
 
+    private static final Logger log = LoggerFactory.getLogger(WebSocketMessageController.class);
+
     private final SimpMessagingTemplate messagingTemplate;
-    private final MessageRepository messageRepository;
-    private final ChannelMemberRepository memberRepository;
-    private final ProfileRepository profileRepository;
     
     @Autowired
     @Lazy
     private NativeWebSocketConfig nativeWebSocketConfig;
 
     public WebSocketMessageController(
-            SimpMessagingTemplate messagingTemplate,
-            MessageRepository messageRepository,
-            ChannelMemberRepository memberRepository,
-            ProfileRepository profileRepository) {
+            SimpMessagingTemplate messagingTemplate) {
         this.messagingTemplate = messagingTemplate;
-        this.messageRepository = messageRepository;
-        this.memberRepository = memberRepository;
-        this.profileRepository = profileRepository;
     }
 
     /**
@@ -58,40 +44,7 @@ public class WebSocketMessageController {
             @Payload ChatMessageRequest request,
             Principal principal) {
         
-        if (principal == null) {
-            System.out.println("❌ Unauthenticated WebSocket message attempt");
-            return;
-        }
-
-        UUID userId;
-        if (principal instanceof WebSocketPrincipal wsp) {
-            userId = wsp.getUserId();
-        } else {
-            userId = UUID.fromString(principal.getName());
-        }
-
-        UUID channelUuid = UUID.fromString(channelId);
-
-        // Verify user is member of channel
-        if (!memberRepository.existsByChannelIdAndUserId(channelUuid, userId)) {
-            System.out.println("❌ User " + userId + " not member of channel " + channelId);
-            return;
-        }
-
-        // Save message to database
-        Message message = new Message();
-        message.setChannelId(channelUuid);
-        message.setUserId(userId);
-        message.setContent(request.content());
-        messageRepository.save(message);
-
-        // Build response with sender info
-        Map<String, Object> response = buildMessageResponse(message, userId);
-
-        // Broadcast to all channel subscribers
-        messagingTemplate.convertAndSend("/topic/channel/" + channelId, response);
-        
-        System.out.println("📨 Message broadcast to channel " + channelId);
+        log.info("Chat messaging disabled. Ignoring message for channel {}", channelId);
     }
 
     /**
@@ -105,29 +58,7 @@ public class WebSocketMessageController {
             @Payload TypingRequest request,
             Principal principal) {
         
-        if (principal == null) return;
-
-        UUID userId;
-        if (principal instanceof WebSocketPrincipal wsp) {
-            userId = wsp.getUserId();
-        } else {
-            userId = UUID.fromString(principal.getName());
-        }
-
-        // Get user's name
-        String userName = "Someone";
-        var profileOpt = profileRepository.findById(userId);
-        if (profileOpt.isPresent()) {
-            userName = profileOpt.get().getFullName();
-        }
-
-        Map<String, Object> response = Map.of(
-            "userId", userId.toString(),
-            "userName", userName,
-            "isTyping", request.isTyping()
-        );
-
-        messagingTemplate.convertAndSend("/topic/channel/" + channelId + "/typing", response);
+        log.info("Chat typing indicators disabled. Ignoring typing for channel {}", channelId);
     }
 
     /**
@@ -137,22 +68,7 @@ public class WebSocketMessageController {
      */
     @MessageMapping("/presence")
     public void handlePresence(@Payload PresenceRequest request, Principal principal) {
-        if (principal == null) return;
-
-        UUID userId;
-        if (principal instanceof WebSocketPrincipal wsp) {
-            userId = wsp.getUserId();
-        } else {
-            userId = UUID.fromString(principal.getName());
-        }
-
-        Map<String, Object> response = Map.of(
-            "userId", userId.toString(),
-            "status", request.status() // "online", "offline", "away"
-        );
-
-        messagingTemplate.convertAndSend("/topic/presence", response);
-        System.out.println("👤 User " + userId + " is now " + request.status());
+        log.info("Chat presence updates disabled. Ignoring presence update.");
     }
 
     /**
@@ -197,8 +113,8 @@ public class WebSocketMessageController {
         if (nativeWebSocketConfig != null) {
             nativeWebSocketConfig.broadcastToTopic("/topic/tasks", notification);
         }
-        
-        System.out.println("📣 Task " + action + " broadcast for task " + taskId);
+
+        log.info("Task {} broadcast for task {}", action, taskId);
     }
 
     /**
@@ -219,44 +135,8 @@ public class WebSocketMessageController {
         if (nativeWebSocketConfig != null) {
             nativeWebSocketConfig.broadcastToTopic("/topic/announcements", notification);
         }
-        
-        System.out.println("📣 Announcement " + action + " broadcast for announcement " + announcementId);
-    }
 
-    private Map<String, Object> buildMessageResponse(Message msg, UUID senderId) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("id", msg.getId());
-        response.put("channelId", msg.getChannelId().toString());
-        response.put("userId", senderId.toString());
-        response.put("content", msg.getContent());
-        response.put("createdAt", msg.getCreatedAt().toString());
-
-        // Add sender info
-        var senderOpt = profileRepository.findById(senderId);
-        if (senderOpt.isPresent()) {
-            Profile sender = senderOpt.get();
-            Map<String, Object> senderInfo = new HashMap<>();
-            senderInfo.put("id", sender.getId().toString());
-            senderInfo.put("fullName", sender.getFullName());
-            senderInfo.put("avatarUrl", getAvatarUrl(sender));
-            response.put("sender", senderInfo);
-        }
-
-        return response;
-    }
-
-    private String getAvatarUrl(Profile p) {
-        if (p.getAvatarUrl() != null && !p.getAvatarUrl().isEmpty()) {
-            return p.getAvatarUrl();
-        }
-        String style = "bottts";
-        if (p.getGender() != null) {
-            if (p.getGender().equalsIgnoreCase("male")) style = "adventurer";
-            else if (p.getGender().equalsIgnoreCase("female")) style = "adventurer-neutral";
-        }
-        String seed = p.getEmployeeId() != null ? p.getEmployeeId() : 
-                (p.getEmail() != null ? p.getEmail() : "User");
-        return "https://api.dicebear.com/7.x/" + style + "/svg?seed=" + seed;
+        log.info("Announcement {} broadcast for announcement {}", action, announcementId);
     }
 
     // Request DTOs

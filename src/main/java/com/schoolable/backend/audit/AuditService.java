@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -23,6 +25,8 @@ import java.util.UUID;
  */
 @Service
 public class AuditService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuditService.class);
 
     @Autowired
     private AuditLogRepository auditLogRepository;
@@ -115,7 +119,7 @@ public class AuditService {
             auditLogRepository.save(log);
         } catch (JsonProcessingException e) {
             // Log error but don't fail the main operation
-            System.err.println("Failed to create audit log: " + e.getMessage());
+            log.warn("Failed to create audit log: {}", e.getMessage());
         }
     }
 
@@ -139,7 +143,7 @@ public class AuditService {
             captureRequestMetadata(log);
             auditLogRepository.save(log);
         } catch (Exception e) {
-            System.err.println("Failed to create audit log: " + e.getMessage());
+            log.warn("Failed to create audit log: {}", e.getMessage());
         }
     }
 
@@ -167,7 +171,7 @@ public class AuditService {
             captureRequestMetadata(log);
             auditLogRepository.save(log);
         } catch (Exception e) {
-            System.err.println("Failed to create audit log: " + e.getMessage());
+            log.warn("Failed to create audit log: {}", e.getMessage());
         }
     }
 
@@ -208,7 +212,7 @@ public class AuditService {
 
             auditLogRepository.save(log);
         } catch (Exception e) {
-            System.err.println("Failed to create audit log: " + e.getMessage());
+            log.warn("Failed to create audit log: {}", e.getMessage());
         }
     }
 
@@ -257,7 +261,7 @@ public class AuditService {
 
             auditLogRepository.save(log);
         } catch (JsonProcessingException e) {
-            System.err.println("Failed to create audit log: " + e.getMessage());
+            log.warn("Failed to create audit log: {}", e.getMessage());
         }
     }
 

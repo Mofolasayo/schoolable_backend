@@ -1,9 +1,14 @@
 package com.schoolable.backend.kpi;
 
+import com.schoolable.backend.ai.AiJob;
+import com.schoolable.backend.ai.AiJobService;
+import com.schoolable.backend.ai.AiJobTypes;
 import com.schoolable.backend.performance.WeeklyPerformanceReport;
 import com.schoolable.backend.performance.WeeklyReportRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -13,6 +18,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.temporal.WeekFields;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -23,6 +29,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class KpiAnalysisService {
+
+    private static final Logger log = LoggerFactory.getLogger(KpiAnalysisService.class);
 
     @Autowired
     private TeamKpiRepository kpiRepository;
@@ -44,6 +52,9 @@ public class KpiAnalysisService {
 
     @Autowired
     private WeeklyReportRepository weeklyReportRepository;
+
+    @Autowired
+    private AiJobService aiJobService;
 
     // ==================== KPI MANAGEMENT ====================
 
@@ -73,6 +84,9 @@ public class KpiAnalysisService {
         kpi.setQuarter(request.quarter);
         kpi.setYear(request.year);
         kpi.setIsActive(true);
+        kpi.setProgressSource(request.progressSource);
+        kpi.setProgressConfig(request.progressConfig);
+        kpi.setAutoProgressEnabled(request.autoProgressEnabled != null ? request.autoProgressEnabled : false);
 
         return kpiRepository.save(kpi);
     }
@@ -100,11 +114,19 @@ public class KpiAnalysisService {
             kpi.setWeight(request.weight);
         }
 
-        if (request.name != null) kpi.setName(request.name);
-        if (request.description != null) kpi.setDescription(request.description);
-        if (request.targetValue != null) kpi.setTargetValue(BigDecimal.valueOf(request.targetValue));
-        if (request.targetUnit != null) kpi.setTargetUnit(request.targetUnit);
-        if (request.isActive != null) kpi.setIsActive(request.isActive);
+        boolean changed = false;
+        if (request.name != null) { kpi.setName(request.name); changed = true; }
+        if (request.description != null) { kpi.setDescription(request.description); changed = true; }
+        if (request.targetValue != null) { kpi.setTargetValue(BigDecimal.valueOf(request.targetValue)); changed = true; }
+        if (request.targetUnit != null) { kpi.setTargetUnit(request.targetUnit); changed = true; }
+        if (request.isActive != null) { kpi.setIsActive(request.isActive); changed = true; }
+        if (request.progressSource != null) { kpi.setProgressSource(request.progressSource); changed = true; }
+        if (request.progressConfig != null) { kpi.setProgressConfig(request.progressConfig); changed = true; }
+        if (request.autoProgressEnabled != null) { kpi.setAutoProgressEnabled(request.autoProgressEnabled); changed = true; }
+
+        if (changed) {
+            kpi.setVersion(kpi.getVersion() != null ? kpi.getVersion() + 1 : 1);
+        }
 
         return kpiRepository.save(kpi);
     }
@@ -174,6 +196,8 @@ public class KpiAnalysisService {
                 progress.setAchievedValue(BigDecimal.valueOf(item.achievedValue));
                 progress.setNotes(item.notes);
             }
+            progress.setSource("manual");
+            progress.setIngestedAt(OffsetDateTime.now());
 
             // Calculate progress percentage
             double progressPct = (item.achievedValue / kpi.getTargetValue().doubleValue()) * 100;
@@ -199,6 +223,11 @@ public class KpiAnalysisService {
      */
     @Transactional
     public AiInsight generateWeeklyInsight(UUID teamLeadId, Integer weekNumber, Integer year) {
+        return generateWeeklyInsight(teamLeadId, weekNumber, year, null, null);
+    }
+
+    @Transactional
+    public AiInsight generateWeeklyInsight(UUID teamLeadId, Integer weekNumber, Integer year, UUID jobId, UUID requestedBy) {
         Profile teamLead = profileRepository.findById(teamLeadId)
             .orElseThrow(() -> new RuntimeException("Team lead not found"));
 
@@ -295,7 +324,8 @@ public class KpiAnalysisService {
             kpiData,
             memberFeedback,
             weekNumber,
-            year
+            year,
+            jobId
         );
 
         // Save insight
@@ -312,8 +342,36 @@ public class KpiAnalysisService {
         insight.setRecommendations(aiResult.recommendations);
         insight.setRiskAlerts(aiResult.riskAlerts);
         insight.setRawAiResponse(aiResult.rawResponse);
+        insight.setPromptVersion(aiResult.promptVersion);
+        insight.setModelUsed(aiResult.modelUsed);
+        insight.setAiRequestId(aiResult.requestId);
+        insight.setAiJobId(jobId);
+        insight.setGeneratedBy(requestedBy);
 
         return insightRepository.save(insight);
+    }
+
+    public AiJob enqueueWeeklyInsight(UUID teamLeadId, Integer weekNumber, Integer year, UUID requestedBy) {
+        return aiJobService.enqueueJob(
+            AiJobTypes.KPI_WEEKLY_INSIGHT,
+            Map.of(
+                "teamLeadId", teamLeadId.toString(),
+                "weekNumber", weekNumber,
+                "year", year,
+                "requestedBy", requestedBy != null ? requestedBy.toString() : null
+            ),
+            3
+        );
+    }
+
+    @Transactional
+    public void processWeeklyInsightJob(UUID jobId, Map<String, Object> payload) {
+        UUID teamLeadId = UUID.fromString(payload.get("teamLeadId").toString());
+        Integer weekNumber = Integer.valueOf(payload.get("weekNumber").toString());
+        Integer year = Integer.valueOf(payload.get("year").toString());
+        UUID requestedBy = payload.get("requestedBy") != null ? UUID.fromString(payload.get("requestedBy").toString()) : null;
+
+        generateWeeklyInsight(teamLeadId, weekNumber, year, jobId, requestedBy);
     }
 
     /**
@@ -322,7 +380,7 @@ public class KpiAnalysisService {
     @Scheduled(cron = "0 0 23 * * SUN")
     @Transactional
     public void generateAllWeeklyInsights() {
-        System.out.println("🤖 Starting weekly AI insight generation...");
+        log.info("Starting weekly AI insight generation");
 
         LocalDate now = LocalDate.now();
         int weekNumber = now.get(WeekFields.of(Locale.getDefault()).weekOfYear());
@@ -341,15 +399,15 @@ public class KpiAnalysisService {
 
         for (UUID teamLeadId : teamLeadIds) {
             try {
-                generateWeeklyInsight(teamLeadId, weekNumber, year);
+                enqueueWeeklyInsight(teamLeadId, weekNumber, year, null);
                 success++;
             } catch (Exception e) {
-                System.err.println("Error generating insight for " + teamLeadId + ": " + e.getMessage());
+                log.warn("Error generating insight for {}: {}", teamLeadId, e.getMessage());
                 errors++;
             }
         }
 
-        System.out.println("✅ Weekly insight generation complete. Success: " + success + ", Errors: " + errors);
+        log.info("Weekly insight generation complete. Success: {}, Errors: {}", success, errors);
     }
 
     /**
@@ -380,6 +438,11 @@ public class KpiAnalysisService {
      */
     @Transactional
     public TeamQuarterlyScore calculateQuarterlyScore(UUID teamLeadId, String quarter, Integer year) {
+        return calculateQuarterlyScore(teamLeadId, quarter, year, null, null);
+    }
+
+    @Transactional
+    public TeamQuarterlyScore calculateQuarterlyScore(UUID teamLeadId, String quarter, Integer year, UUID jobId, UUID requestedBy) {
         Profile teamLead = profileRepository.findById(teamLeadId)
             .orElseThrow(() -> new RuntimeException("Team lead not found"));
 
@@ -413,7 +476,8 @@ public class KpiAnalysisService {
             teamLead.getDepartment(),
             kpiData,
             quarter,
-            year
+            year,
+            jobId
         );
 
         // Find or create quarterly score
@@ -426,9 +490,35 @@ public class KpiAnalysisService {
         score.setKpiAchievementScore(aiResult.kpiScore);
         score.setOverallTeamScore(aiResult.kpiScore); // Can add more factors later
         score.setAiSummary(aiResult.summary);
+        score.setAiRequestId(aiResult.requestId);
+        score.setPromptVersion(aiResult.promptVersion);
+        score.setModelUsed(aiResult.modelUsed);
         score.calculateGrade();
 
         return quarterlyScoreRepository.save(score);
+    }
+
+    public AiJob enqueueQuarterlyScore(UUID teamLeadId, String quarter, Integer year, UUID requestedBy) {
+        return aiJobService.enqueueJob(
+            AiJobTypes.KPI_QUARTERLY_SCORE,
+            Map.of(
+                "teamLeadId", teamLeadId.toString(),
+                "quarter", quarter,
+                "year", year,
+                "requestedBy", requestedBy != null ? requestedBy.toString() : null
+            ),
+            2
+        );
+    }
+
+    @Transactional
+    public void processQuarterlyScoreJob(UUID jobId, Map<String, Object> payload) {
+        UUID teamLeadId = UUID.fromString(payload.get("teamLeadId").toString());
+        String quarter = payload.get("quarter").toString();
+        Integer year = Integer.valueOf(payload.get("year").toString());
+        UUID requestedBy = payload.get("requestedBy") != null ? UUID.fromString(payload.get("requestedBy").toString()) : null;
+
+        calculateQuarterlyScore(teamLeadId, quarter, year, jobId, requestedBy);
     }
 
     /**
@@ -476,6 +566,9 @@ public class KpiAnalysisService {
         public Integer weight;
         public String quarter;
         public Integer year;
+        public String progressSource;
+        public Map<String, Object> progressConfig;
+        public Boolean autoProgressEnabled;
     }
 
     public static class KpiUpdateRequest {
@@ -485,6 +578,9 @@ public class KpiAnalysisService {
         public String targetUnit;
         public Integer weight;
         public Boolean isActive;
+        public String progressSource;
+        public Map<String, Object> progressConfig;
+        public Boolean autoProgressEnabled;
     }
 
     public static class WeeklyProgressRequest {

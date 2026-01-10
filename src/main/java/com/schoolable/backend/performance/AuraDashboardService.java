@@ -4,7 +4,6 @@ import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.task.TaskRepository;
 import com.schoolable.backend.attendance.AttendanceRepository;
-import com.schoolable.backend.messaging.MessageRepository;
 import com.schoolable.backend.announcement.AnnouncementReadRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -34,9 +33,6 @@ public class AuraDashboardService {
 
     @Autowired
     private AttendanceRepository attendanceRepository;
-
-    @Autowired
-    private MessageRepository messageRepository;
 
     @Autowired
     private TrainingRecordRepository trainingRecordRepository;
@@ -388,21 +384,8 @@ public class AuraDashboardService {
         LocalDate quarterStart = getQuarterStartDate();
         OffsetDateTime quarterStartOdt = quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC);
 
-        // Communication score (10%): Based on messages sent this quarter
-        // Scoring: 0 = 20%, 1-9 = 40%, 10-29 = 60%, 30-59 = 80%, 60+ = 100%
-        long userMessages = messageRepository.countByUserIdAndCreatedAtAfter(employeeId, quarterStartOdt);
-        double communicationScore;
-        if (userMessages >= 60) {
-            communicationScore = 100.0;
-        } else if (userMessages >= 30) {
-            communicationScore = 80.0;
-        } else if (userMessages >= 10) {
-            communicationScore = 60.0;
-        } else if (userMessages > 0) {
-            communicationScore = 40.0;
-        } else {
-            communicationScore = 20.0;
-        }
+        // Communication score (10%): Messaging disabled in production; use neutral baseline.
+        double communicationScore = 60.0;
 
         // Cross-functional work (5%): (placeholder - would need channel_members analysis)
         double crossFunctionalScore = 60.0;
@@ -633,5 +616,4 @@ public class AuraDashboardService {
         return result;
     }
 }
-
 

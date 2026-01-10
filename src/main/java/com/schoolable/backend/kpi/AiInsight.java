@@ -62,6 +62,24 @@ public class AiInsight {
     @Column(name = "raw_ai_response", columnDefinition = "jsonb")
     private Map<String, Object> rawAiResponse;
 
+    @Column(name = "prompt_version", length = 20)
+    private String promptVersion;
+
+    @Column(name = "model_used", length = 100)
+    private String modelUsed;
+
+    @Column(name = "ai_job_id")
+    private UUID aiJobId;
+
+    @Column(name = "ai_request_id")
+    private UUID aiRequestId;
+
+    @Column(name = "generated_by")
+    private UUID generatedBy;
+
+    @Column(name = "generation_status", length = 20)
+    private String generationStatus = "COMPLETED";
+
     @Column(name = "generated_at")
     private LocalDateTime generatedAt = LocalDateTime.now();
 
@@ -113,6 +131,24 @@ public class AiInsight {
 
     public Map<String, Object> getRawAiResponse() { return rawAiResponse; }
     public void setRawAiResponse(Map<String, Object> rawAiResponse) { this.rawAiResponse = rawAiResponse; }
+
+    public String getPromptVersion() { return promptVersion; }
+    public void setPromptVersion(String promptVersion) { this.promptVersion = promptVersion; }
+
+    public String getModelUsed() { return modelUsed; }
+    public void setModelUsed(String modelUsed) { this.modelUsed = modelUsed; }
+
+    public UUID getAiJobId() { return aiJobId; }
+    public void setAiJobId(UUID aiJobId) { this.aiJobId = aiJobId; }
+
+    public UUID getAiRequestId() { return aiRequestId; }
+    public void setAiRequestId(UUID aiRequestId) { this.aiRequestId = aiRequestId; }
+
+    public UUID getGeneratedBy() { return generatedBy; }
+    public void setGeneratedBy(UUID generatedBy) { this.generatedBy = generatedBy; }
+
+    public String getGenerationStatus() { return generationStatus; }
+    public void setGenerationStatus(String generationStatus) { this.generationStatus = generationStatus; }
 
     public LocalDateTime getGeneratedAt() { return generatedAt; }
     public void setGeneratedAt(LocalDateTime generatedAt) { this.generatedAt = generatedAt; }

@@ -1,5 +1,6 @@
 package com.schoolable.backend.kpi;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -7,6 +8,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -29,6 +31,15 @@ public class IndividualKpiController {
 
     @Autowired
     private ProfileRepository profileRepository;
+
+    @Autowired
+    private KpiLockService kpiLockService;
+
+    @Autowired
+    private KpiChangeRequestRepository changeRequestRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     // ==================== TEAM LEAD - CREATE/MANAGE ====================
 
@@ -167,6 +178,30 @@ public class IndividualKpiController {
         String quarter = request.quarter() != null ? request.quarter() : getCurrentQuarter();
         int year = request.year() != null ? request.year() : LocalDate.now().getYear();
 
+        if (kpiLockService.isLocked("individual", quarter, year, userId, department) && !isAdmin(auth)) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("employeeId", request.employeeId());
+            payload.put("setById", userId.toString());
+            payload.put("department", department);
+            payload.put("name", request.name());
+            payload.put("description", request.description());
+            payload.put("targetValue", request.targetValue());
+            payload.put("targetUnit", request.targetUnit());
+            payload.put("weight", request.weight());
+            payload.put("quarter", quarter);
+            payload.put("year", year);
+            if (request.progressSource() != null) payload.put("progressSource", request.progressSource());
+            if (request.progressConfig() != null) payload.put("progressConfig", request.progressConfig());
+            if (request.autoProgressEnabled() != null) payload.put("autoProgressEnabled", request.autoProgressEnabled());
+
+            return queueChangeRequest(
+                "CREATE",
+                null,
+                payload,
+                userId
+            );
+        }
+
         // Check total weight won't exceed 100
         Integer currentWeight = individualKpiRepository.getTotalWeight(employeeId, quarter, year);
         if (currentWeight != null && currentWeight + request.weight() > 100) {
@@ -186,6 +221,9 @@ public class IndividualKpiController {
         kpi.setWeight(request.weight());
         kpi.setQuarter(quarter);
         kpi.setYear(year);
+        kpi.setProgressSource(request.progressSource());
+        kpi.setProgressConfig(request.progressConfig());
+        kpi.setAutoProgressEnabled(request.autoProgressEnabled() != null ? request.autoProgressEnabled() : false);
 
         kpi = individualKpiRepository.save(kpi);
 
@@ -218,6 +256,22 @@ public class IndividualKpiController {
             return ResponseEntity.status(403).body(Map.of("error", "You can only edit KPIs you created"));
         }
 
+        if (kpiLockService.isLocked("individual", kpi.getQuarter(), kpi.getYear(), kpi.getSetById(), kpi.getDepartment()) && !isAdmin(auth)) {
+            Map<String, Object> changes = new LinkedHashMap<>();
+            if (request.name() != null) changes.put("name", request.name());
+            if (request.description() != null) changes.put("description", request.description());
+            if (request.targetValue() != null) changes.put("targetValue", request.targetValue());
+            if (request.currentValue() != null) changes.put("currentValue", request.currentValue());
+            if (request.targetUnit() != null) changes.put("targetUnit", request.targetUnit());
+            if (request.weight() != null) changes.put("weight", request.weight());
+            if (request.isActive() != null) changes.put("isActive", request.isActive());
+            if (request.progressSource() != null) changes.put("progressSource", request.progressSource());
+            if (request.progressConfig() != null) changes.put("progressConfig", request.progressConfig());
+            if (request.autoProgressEnabled() != null) changes.put("autoProgressEnabled", request.autoProgressEnabled());
+
+            return queueChangeRequest("UPDATE", kpi.getId(), changes, userId);
+        }
+
         // Update fields
         if (request.name() != null) kpi.setName(request.name());
         if (request.description() != null) kpi.setDescription(request.description());
@@ -235,7 +289,11 @@ public class IndividualKpiController {
             kpi.setWeight(request.weight());
         }
         if (request.isActive() != null) kpi.setIsActive(request.isActive());
+        if (request.progressSource() != null) kpi.setProgressSource(request.progressSource());
+        if (request.progressConfig() != null) kpi.setProgressConfig(request.progressConfig());
+        if (request.autoProgressEnabled() != null) kpi.setAutoProgressEnabled(request.autoProgressEnabled());
 
+        kpi.setVersion(kpi.getVersion() != null ? kpi.getVersion() + 1 : 1);
         kpi.setUpdatedAt(LocalDateTime.now());
         kpi = individualKpiRepository.save(kpi);
 
@@ -262,6 +320,10 @@ public class IndividualKpiController {
         IndividualKpi kpi = kpiOpt.get();
         if (!kpi.getSetById().equals(userId)) {
             return ResponseEntity.status(403).body(Map.of("error", "You can only delete KPIs you created"));
+        }
+
+        if (kpiLockService.isLocked("individual", kpi.getQuarter(), kpi.getYear(), kpi.getSetById(), kpi.getDepartment()) && !isAdmin(auth)) {
+            return queueChangeRequest("DELETE", kpi.getId(), Map.of("kpiId", kpi.getId().toString()), userId);
         }
 
         individualKpiRepository.delete(kpi);
@@ -309,6 +371,35 @@ public class IndividualKpiController {
         return "Q4";
     }
 
+    private ResponseEntity<?> queueChangeRequest(String requestType, UUID kpiId, Map<String, Object> payload, UUID requestedBy) {
+        try {
+            KpiChangeRequest changeRequest = new KpiChangeRequest();
+            changeRequest.setKpiType("individual");
+            changeRequest.setRequestType(requestType);
+            changeRequest.setKpiId(kpiId);
+            changeRequest.setRequestedBy(requestedBy);
+            changeRequest.setPayload(objectMapper.writeValueAsString(payload));
+            changeRequestRepository.save(changeRequest);
+
+            return ResponseEntity.accepted().body(Map.of(
+                "success", true,
+                "status", "PENDING",
+                "changeRequestId", changeRequest.getId()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", "Failed to queue change request"
+            ));
+        }
+    }
+
+    private boolean isAdmin(Authentication auth) {
+        if (auth == null) return false;
+        return auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))
+            || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
+    }
+
     private Map<String, Object> toDto(IndividualKpi kpi) {
         Map<String, Object> dto = new LinkedHashMap<>();
         dto.put("id", kpi.getId().toString());
@@ -327,6 +418,11 @@ public class IndividualKpiController {
         dto.put("achievementPercentage", kpi.getAchievementPercentage());
         dto.put("createdAt", kpi.getCreatedAt());
         dto.put("updatedAt", kpi.getUpdatedAt());
+        dto.put("version", kpi.getVersion());
+        dto.put("progressSource", kpi.getProgressSource());
+        dto.put("progressConfig", kpi.getProgressConfig());
+        dto.put("autoProgressEnabled", kpi.getAutoProgressEnabled());
+        dto.put("lastProgressSyncAt", kpi.getLastProgressSyncAt());
         return dto;
     }
 
@@ -339,7 +435,10 @@ public class IndividualKpiController {
         String targetUnit,
         Integer weight,
         String quarter,
-        Integer year
+        Integer year,
+        String progressSource,
+        Map<String, Object> progressConfig,
+        Boolean autoProgressEnabled
     ) {}
 
     public record UpdateKpiRequest(
@@ -349,6 +448,9 @@ public class IndividualKpiController {
         Double currentValue,
         String targetUnit,
         Integer weight,
-        Boolean isActive
+        Boolean isActive,
+        String progressSource,
+        Map<String, Object> progressConfig,
+        Boolean autoProgressEnabled
     ) {}
 }

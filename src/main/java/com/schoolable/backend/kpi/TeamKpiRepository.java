@@ -31,4 +31,6 @@ public interface TeamKpiRepository extends JpaRepository<TeamKpi, UUID> {
     // Find KPIs by department for super admin
     @Query("SELECT k FROM TeamKpi k WHERE k.isActive = true AND k.quarter = :quarter AND k.year = :year ORDER BY k.department, k.name")
     List<TeamKpi> findAllActiveByQuarterAndYear(@Param("quarter") String quarter, @Param("year") Integer year);
+
+    List<TeamKpi> findByAutoProgressEnabledTrueAndQuarterAndYear(String quarter, Integer year);
 }

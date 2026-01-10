@@ -28,8 +28,8 @@ public class LateAnalyticsController {
     @Autowired
     private ProfileRepository profileRepository;
 
-    // Expected check-in time: 9:00 AM
-    private static final LocalTime EXPECTED_CHECK_IN = LocalTime.of(9, 0);
+    @Autowired
+    private AttendancePolicyService attendancePolicyService;
 
     // ==================== MAIN ANALYTICS ====================
 
@@ -41,7 +41,7 @@ public class LateAnalyticsController {
             Authentication auth
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdminProfile(admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -60,7 +60,7 @@ public class LateAnalyticsController {
         int totalMinutesLate = 0;
 
         for (Attendance a : allAttendance) {
-            int minutesLate = calculateMinutesLate(a.getCheckIn());
+            int minutesLate = calculateMinutesLate(a);
             
             if (minutesLate > 0) {
                 totalLate++;
@@ -74,8 +74,7 @@ public class LateAnalyticsController {
                 lateRecord.put("userName", user != null ? user.getFullName() : "Unknown");
                 lateRecord.put("userAvatar", user != null ? getAvatarUrl(user) : null);
                 lateRecord.put("department", user != null ? user.getDepartment() : null);
-                lateRecord.put("checkInTime", a.getCheckIn() != null ? 
-                    a.getCheckIn().toLocalTime().toString() : null);
+                lateRecord.put("checkInTime", formatCheckInTime(a));
                 lateRecord.put("minutesLate", minutesLate);
                 lateRecord.put("reason", a.getNote() != null ? a.getNote() : "No reason provided");
                 lateRecord.put("reasonCategory", categorizeReason(a.getNote()));
@@ -133,7 +132,7 @@ public class LateAnalyticsController {
             Authentication auth
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdminProfile(admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -148,7 +147,7 @@ public class LateAnalyticsController {
         Map<UUID, LocalDate> userLastLate = new HashMap<>();
 
         for (Attendance a : allAttendance) {
-            int minutesLate = calculateMinutesLate(a.getCheckIn());
+            int minutesLate = calculateMinutesLate(a);
             if (minutesLate > 0) {
                 userLateCounts.merge(a.getUserId(), 1, Integer::sum);
                 userLateMinutes.computeIfAbsent(a.getUserId(), k -> new ArrayList<>()).add(minutesLate);
@@ -198,7 +197,7 @@ public class LateAnalyticsController {
     @GetMapping("/today")
     public ResponseEntity<?> getTodayLateCheckIns(Authentication auth) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdminProfile(admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -210,7 +209,7 @@ public class LateAnalyticsController {
         int late = 0;
 
         for (Attendance a : todayAttendance) {
-            int minutesLate = calculateMinutesLate(a.getCheckIn());
+            int minutesLate = calculateMinutesLate(a);
             
             if (minutesLate > 0) {
                 late++;
@@ -222,7 +221,7 @@ public class LateAnalyticsController {
                 record.put("userName", user != null ? user.getFullName() : "Unknown");
                 record.put("userAvatar", user != null ? getAvatarUrl(user) : null);
                 record.put("department", user != null ? user.getDepartment() : null);
-                record.put("checkInTime", a.getCheckIn().toLocalTime().toString());
+                record.put("checkInTime", formatCheckInTime(a));
                 record.put("minutesLate", minutesLate);
                 record.put("reason", a.getNote());
                 
@@ -247,15 +246,38 @@ public class LateAnalyticsController {
 
     // ==================== HELPER METHODS ====================
 
-    private int calculateMinutesLate(OffsetDateTime checkIn) {
-        if (checkIn == null) return 0;
-        
-        LocalTime checkInTime = checkIn.toLocalTime();
-        if (checkInTime.isBefore(EXPECTED_CHECK_IN) || checkInTime.equals(EXPECTED_CHECK_IN)) {
-            return 0;
-        }
-        
-        return (int) Duration.between(EXPECTED_CHECK_IN, checkInTime).toMinutes();
+    private int calculateMinutesLate(Attendance attendance) {
+        if (attendance.getCheckIn() == null) return 0;
+
+        AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(
+            attendance.getUserId(), attendance.getDate()
+        );
+        if (!policy.isWorkDay() || policy.isHoliday() || policy.isOnLeave()) return 0;
+
+        WorkSchedule schedule = policy.schedule();
+        if (schedule == null || schedule.getStartTime() == null) return 0;
+
+        LocalTime expected = schedule.getStartTime().plusMinutes(
+            schedule.getGraceMinutes() != null ? schedule.getGraceMinutes() : 0
+        );
+        LocalTime checkInTime = resolveCheckInTime(attendance, schedule);
+        if (!checkInTime.isAfter(expected)) return 0;
+
+        return (int) Duration.between(expected, checkInTime).toMinutes();
+    }
+
+    private String formatCheckInTime(Attendance attendance) {
+        if (attendance.getCheckIn() == null) return null;
+        AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(
+            attendance.getUserId(), attendance.getDate()
+        );
+        WorkSchedule schedule = policy != null ? policy.schedule() : null;
+        return resolveCheckInTime(attendance, schedule).toString();
+    }
+
+    private LocalTime resolveCheckInTime(Attendance attendance, WorkSchedule schedule) {
+        ZoneId zone = attendancePolicyService.resolveZone(schedule, attendance.getOfficeLocationId());
+        return attendance.getCheckIn().atZoneSameInstant(zone).toLocalTime();
     }
 
     private String categorizeReason(String note) {
@@ -320,12 +342,12 @@ public class LateAnalyticsController {
         int secondHalfLate = 0;
         
         for (Attendance a : firstHalf) {
-            if (a.getUserId().equals(userId) && calculateMinutesLate(a.getCheckIn()) > 0) {
+            if (a.getUserId().equals(userId) && calculateMinutesLate(a) > 0) {
                 firstHalfLate++;
             }
         }
         for (Attendance a : secondHalf) {
-            if (a.getUserId().equals(userId) && calculateMinutesLate(a.getCheckIn()) > 0) {
+            if (a.getUserId().equals(userId) && calculateMinutesLate(a) > 0) {
                 secondHalfLate++;
             }
         }
@@ -350,7 +372,7 @@ public class LateAnalyticsController {
         for (Attendance a : allAttendance) {
             int[] stats = dailyStats.get(a.getDate());
             if (stats != null) {
-                if (calculateMinutesLate(a.getCheckIn()) > 0) {
+                if (calculateMinutesLate(a) > 0) {
                     stats[1]++;
                 } else {
                     stats[0]++;
@@ -398,7 +420,13 @@ public class LateAnalyticsController {
     }
 
     private Profile getAdminProfile(Authentication auth) {
-        if (auth == null) return null;
-        return profileRepository.findByEmail(auth.getName()).orElse(null);
+        if (auth == null || auth.getPrincipal() == null) return null;
+        return profileRepository.findById((UUID) auth.getPrincipal()).orElse(null);
+    }
+
+    private boolean isAdminProfile(Profile profile) {
+        if (profile == null || profile.getRole() == null) return false;
+        String role = profile.getRole().toLowerCase(Locale.ROOT);
+        return role.equals("admin") || role.equals("super_admin") || role.equals("superadmin");
     }
 }

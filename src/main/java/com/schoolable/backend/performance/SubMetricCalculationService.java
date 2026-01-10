@@ -5,6 +5,8 @@ import com.schoolable.backend.compliance.ComplianceSubmissionRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.task.TaskRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,8 @@ import static com.schoolable.backend.performance.AuraPillarConfig.*;
  */
 @Service
 public class SubMetricCalculationService {
+
+    private static final Logger log = LoggerFactory.getLogger(SubMetricCalculationService.class);
 
     @Autowired
     private SubMetricScoreRepository subMetricRepository;
@@ -54,7 +58,7 @@ public class SubMetricCalculationService {
     @Scheduled(cron = "0 0 2 * * SUN")
     @Transactional
     public void scheduledAutoCalculation() {
-        System.out.println("Starting scheduled sub-metric calculation at " + OffsetDateTime.now());
+        log.info("Starting scheduled sub-metric calculation at {}", OffsetDateTime.now());
         calculateAllEmployeeMetrics();
     }
 
