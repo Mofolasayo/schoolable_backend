@@ -1,6 +1,10 @@
 package com.schoolable.backend.ai;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -21,11 +25,13 @@ public class AiRequestLog {
     @Column(name = "model", length = 100)
     private String model;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "request_payload", columnDefinition = "jsonb")
-    private String requestPayload;
+    private JsonNode requestPayload;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "response_payload", columnDefinition = "jsonb")
-    private String responsePayload;
+    private JsonNode responsePayload;
 
     @Column(length = 20)
     private String status;
@@ -51,11 +57,11 @@ public class AiRequestLog {
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
 
-    public String getRequestPayload() { return requestPayload; }
-    public void setRequestPayload(String requestPayload) { this.requestPayload = requestPayload; }
+    public JsonNode getRequestPayload() { return requestPayload; }
+    public void setRequestPayload(JsonNode requestPayload) { this.requestPayload = requestPayload; }
 
-    public String getResponsePayload() { return responsePayload; }
-    public void setResponsePayload(String responsePayload) { this.responsePayload = responsePayload; }
+    public JsonNode getResponsePayload() { return responsePayload; }
+    public void setResponsePayload(JsonNode responsePayload) { this.responsePayload = responsePayload; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

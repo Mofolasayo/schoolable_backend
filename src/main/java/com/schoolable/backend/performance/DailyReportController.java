@@ -291,6 +291,58 @@ public class DailyReportController {
         ));
     }
 
+    @Operation(summary = "Get daily report attachments (Admin)")
+    @GetMapping("/attachments")
+    public ResponseEntity<?> getReportAttachments(
+            Authentication auth,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        LocalDate end = endDate != null ? LocalDate.parse(endDate) : LocalDate.now();
+        LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.of(2000, 1, 1);
+
+        List<DailyReport> reports = dailyReportRepository.findWithAttachmentsInRange(start, end);
+        Set<UUID> employeeIds = reports.stream()
+            .map(DailyReport::getEmployeeId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+
+        Map<UUID, Profile> profileMap = profileRepository.findAllById(employeeIds).stream()
+            .collect(Collectors.toMap(Profile::getId, p -> p));
+
+        List<Map<String, Object>> attachments = new ArrayList<>();
+        for (DailyReport report : reports) {
+            if (report.getAttachmentUrl() == null || report.getAttachmentUrl().isBlank()) {
+                continue;
+            }
+            Profile employee = profileMap.get(report.getEmployeeId());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", report.getId());
+            item.put("employeeId", report.getEmployeeId());
+            item.put("employeeName", employee != null ? employee.getFullName() : null);
+            item.put("department", employee != null ? employee.getDepartment() : null);
+            item.put("reportDate", report.getReportDate() != null ? report.getReportDate().toString() : null);
+            item.put("attachmentUrl", report.getAttachmentUrl());
+            item.put("attachmentName", report.getAttachmentName());
+            item.put("status", report.getStatus());
+            item.put("createdAt", report.getCreatedAt());
+            attachments.add(item);
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "startDate", start.toString(),
+            "endDate", end.toString(),
+            "count", attachments.size(),
+            "attachments", attachments
+        ));
+    }
+
     // ==================== TEAM LEAD VIEWS ====================
 
     @Operation(summary = "Get team's daily reports (Team Lead)")

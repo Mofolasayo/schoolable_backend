@@ -5,8 +5,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -226,6 +229,28 @@ public class WeeklyReportController {
         }
     }
 
+    @Operation(summary = "Get team report documents (Admin)")
+    @GetMapping("/team-reports")
+    public ResponseEntity<?> getTeamReportDocuments(
+            Authentication auth,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Admin access required"));
+        }
+
+        LocalDate end = endDate != null ? LocalDate.parse(endDate) : LocalDate.now();
+        LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.of(2000, 1, 1);
+
+        List<Map<String, Object>> documents = weeklyReportService.getTeamReportDocuments(start, end);
+        return ResponseEntity.ok(Map.of(
+            "startDate", start.toString(),
+            "endDate", end.toString(),
+            "count", documents.size(),
+            "documents", documents
+        ));
+    }
+
     /**
      * Get employee's weekly performance trend for a year
      * 
@@ -285,5 +310,11 @@ public class WeeklyReportController {
             error.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
+    }
+
+    private boolean isAdmin(Authentication auth) {
+        if (auth == null) return false;
+        return auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))
+            || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
     }
 }

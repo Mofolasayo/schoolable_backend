@@ -4,9 +4,11 @@ import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -29,10 +31,9 @@ public class ComplianceController {
      */
     @GetMapping("/policies")
     public ResponseEntity<?> getAllPolicies(Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
-        
-        if (profile == null || !"admin".equalsIgnoreCase(profile.getRole())) {
+        Profile profile = resolveProfile(auth);
+
+        if (!isAdmin(auth, profile)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
         
@@ -44,10 +45,9 @@ public class ComplianceController {
      */
     @PostMapping("/policies")
     public ResponseEntity<?> createPolicy(@RequestBody CompliancePolicy policy, Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
-        
-        if (profile == null || !"admin".equalsIgnoreCase(profile.getRole())) {
+        Profile profile = resolveProfile(auth);
+
+        if (!isAdmin(auth, profile)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
         
@@ -64,10 +64,9 @@ public class ComplianceController {
      */
     @PutMapping("/policies/{id}")
     public ResponseEntity<?> updatePolicy(@PathVariable UUID id, @RequestBody CompliancePolicy policy, Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
-        
-        if (profile == null || !"admin".equalsIgnoreCase(profile.getRole())) {
+        Profile profile = resolveProfile(auth);
+
+        if (!isAdmin(auth, profile)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
         
@@ -84,10 +83,9 @@ public class ComplianceController {
      */
     @DeleteMapping("/policies/{id}")
     public ResponseEntity<?> deletePolicy(@PathVariable UUID id, Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
-        
-        if (profile == null || !"admin".equalsIgnoreCase(profile.getRole())) {
+        Profile profile = resolveProfile(auth);
+
+        if (!isAdmin(auth, profile)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
         
@@ -102,8 +100,7 @@ public class ComplianceController {
      */
     @GetMapping("/my-items")
     public ResponseEntity<?> getMyComplianceItems(Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
+        Profile profile = resolveProfile(auth);
         
         if (profile == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Profile not found"));
@@ -121,8 +118,7 @@ public class ComplianceController {
             @PathVariable UUID policyId,
             @RequestBody Map<String, Object> data,
             Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
+        Profile profile = resolveProfile(auth);
         
         if (profile == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Profile not found"));
@@ -138,6 +134,36 @@ public class ComplianceController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    private Profile resolveProfile(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return null;
+        }
+        if (auth.getPrincipal() instanceof UUID uuid) {
+            return profileRepository.findById(uuid).orElse(null);
+        }
+        String principal = auth.getPrincipal().toString();
+        try {
+            UUID userId = UUID.fromString(principal);
+            return profileRepository.findById(userId).orElse(null);
+        } catch (IllegalArgumentException ex) {
+            return profileRepository.findByEmail(principal).orElse(null);
+        }
+    }
+
+    private boolean isAdmin(Authentication auth, Profile profile) {
+        if (auth != null && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))) {
+            return true;
+        }
+        if (auth != null && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"))) {
+            return true;
+        }
+        if (profile == null || profile.getRole() == null) {
+            return false;
+        }
+        String role = profile.getRole().toLowerCase(Locale.ROOT);
+        return role.equals("admin") || role.equals("super_admin") || role.equals("superadmin");
     }
     
     // ==================== ADMIN TRACKING ====================

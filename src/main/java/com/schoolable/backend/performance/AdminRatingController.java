@@ -2,11 +2,14 @@ package com.schoolable.backend.performance;
 
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import com.schoolable.backend.hr.TeamLeadAppointment;
+import com.schoolable.backend.hr.TeamLeadRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -29,6 +32,9 @@ public class AdminRatingController {
     private ProfileRepository profileRepository;
 
     @Autowired
+    private TeamLeadRepository teamLeadRepository;
+
+    @Autowired
     private AuraTrendAlertRepository alertRepository;
 
     // ==================== GET TEAM LEADS ====================
@@ -37,11 +43,21 @@ public class AdminRatingController {
     @GetMapping("/team-leads")
     public ResponseEntity<?> getTeamLeadsForRating(Authentication auth) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isSuperAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Only super admins can access this"));
         }
 
-        List<Profile> teamLeads = profileRepository.findByIsTeamLeadTrue();
+        Map<UUID, Profile> teamLeadIndex = new LinkedHashMap<>();
+        List<Profile> flaggedLeads = profileRepository.findByIsTeamLeadTrue();
+        for (Profile lead : flaggedLeads) {
+            teamLeadIndex.put(lead.getId(), lead);
+        }
+        List<TeamLeadAppointment> appointments = teamLeadRepository.findActiveTeamLeads();
+        for (TeamLeadAppointment appointment : appointments) {
+            profileRepository.findById(appointment.getEmployeeId())
+                .ifPresent(profile -> teamLeadIndex.putIfAbsent(profile.getId(), profile));
+        }
+        List<Profile> teamLeads = new ArrayList<>(teamLeadIndex.values());
         
         LocalDate today = LocalDate.now();
         int weekNumber = today.get(WeekFields.ISO.weekOfYear());
@@ -93,7 +109,7 @@ public class AdminRatingController {
             @RequestBody RatingRequest request
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isSuperAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Only super admins can submit ratings"));
         }
 
@@ -155,7 +171,7 @@ public class AdminRatingController {
             @PathVariable UUID teamLeadId
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isSuperAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Only super admins can access this"));
         }
 
@@ -208,7 +224,7 @@ public class AdminRatingController {
     @GetMapping("/alerts")
     public ResponseEntity<?> getAuraAlerts(Authentication auth) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isSuperAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Only super admins can access this"));
         }
 
@@ -261,7 +277,7 @@ public class AdminRatingController {
             @PathVariable Long alertId
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isSuperAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Only super admins can acknowledge alerts"));
         }
 
@@ -284,9 +300,26 @@ public class AdminRatingController {
     // ==================== HELPER METHODS ====================
 
     private Profile getAdminProfile(Authentication auth) {
-        if (auth == null) return null;
-        String email = auth.getName();
-        return profileRepository.findByEmail(email).orElse(null);
+        if (auth == null || auth.getPrincipal() == null) return null;
+        if (auth.getPrincipal() instanceof UUID uuid) {
+            return profileRepository.findById(uuid).orElse(null);
+        }
+        String principal = auth.getPrincipal().toString();
+        try {
+            UUID userId = UUID.fromString(principal);
+            return profileRepository.findById(userId).orElse(null);
+        } catch (IllegalArgumentException ex) {
+            return profileRepository.findByEmail(principal).orElse(null);
+        }
+    }
+
+    private boolean isSuperAdmin(Authentication auth, Profile profile) {
+        if (auth != null && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"))) {
+            return true;
+        }
+        if (profile == null || profile.getRole() == null) return false;
+        String role = profile.getRole().toLowerCase(Locale.ROOT);
+        return role.equals("super_admin") || role.equals("superadmin");
     }
 
     // ==================== REQUEST CLASS ====================

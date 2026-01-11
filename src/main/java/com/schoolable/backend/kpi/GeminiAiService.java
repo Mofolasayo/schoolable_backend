@@ -3,6 +3,7 @@ package com.schoolable.backend.kpi;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.TextNode;
 import com.schoolable.backend.ai.AiRequestLog;
 import com.schoolable.backend.ai.AiRequestLogRepository;
 import org.slf4j.Logger;
@@ -901,14 +902,25 @@ public class GeminiAiService {
         logEntry.setJobId(jobId);
         logEntry.setPromptVersion(promptVersion);
         logEntry.setModel(model);
-        logEntry.setRequestPayload(requestPayload);
-        logEntry.setResponsePayload(responsePayload);
+        logEntry.setRequestPayload(toJsonNode(requestPayload));
+        logEntry.setResponsePayload(toJsonNode(responsePayload));
         logEntry.setStatus(status);
         logEntry.setLatencyMs(latencyMs);
         logEntry.setErrorMessage(errorMessage);
         logEntry.setCreatedAt(OffsetDateTime.now());
 
         return aiRequestLogRepository.save(logEntry).getId();
+    }
+
+    private JsonNode toJsonNode(String payload) {
+        if (payload == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(payload);
+        } catch (JsonProcessingException e) {
+            return TextNode.valueOf(payload);
+        }
     }
 
     /**

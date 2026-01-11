@@ -275,6 +275,47 @@ public class WeeklyReportService {
                 .collect(Collectors.toList());
     }
 
+    public List<Map<String, Object>> getTeamReportDocuments(LocalDate startDate, LocalDate endDate) {
+        List<WeeklyPerformanceReport> reports = weeklyReportRepository.findTeamReportsInRange(startDate, endDate);
+        Map<String, WeeklyPerformanceReport> uniqueReports = new LinkedHashMap<>();
+
+        for (WeeklyPerformanceReport report : reports) {
+            if (report.getTeamReportUrl() == null || report.getTeamReportUrl().isBlank()) {
+                continue;
+            }
+            if (report.getReviewerId() == null) {
+                continue;
+            }
+            String key = report.getReviewerId() + "|" + report.getYear() + "|" + report.getWeekNumber() + "|" + report.getTeamReportUrl();
+            uniqueReports.putIfAbsent(key, report);
+        }
+
+        Set<UUID> reviewerIds = uniqueReports.values().stream()
+            .map(WeeklyPerformanceReport::getReviewerId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        Map<UUID, Profile> reviewerMap = profileRepository.findAllById(reviewerIds).stream()
+            .collect(Collectors.toMap(Profile::getId, p -> p));
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (WeeklyPerformanceReport report : uniqueReports.values()) {
+            Profile reviewer = reviewerMap.get(report.getReviewerId());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", report.getId());
+            item.put("teamLeadId", report.getReviewerId());
+            item.put("teamLeadName", reviewer != null ? reviewer.getFullName() : null);
+            item.put("department", reviewer != null ? reviewer.getDepartment() : null);
+            item.put("weekNumber", report.getWeekNumber());
+            item.put("year", report.getYear());
+            item.put("weekStartDate", report.getWeekStartDate() != null ? report.getWeekStartDate().toString() : null);
+            item.put("weekEndDate", report.getWeekEndDate() != null ? report.getWeekEndDate().toString() : null);
+            item.put("teamReportUrl", report.getTeamReportUrl());
+            results.add(item);
+        }
+
+        return results;
+    }
+
     // Helper methods
     private LocalDate getWeekStartDate(int year, int weekNumber) {
         WeekFields weekFields = WeekFields.of(DayOfWeek.MONDAY, 4);

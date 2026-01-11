@@ -88,4 +88,11 @@ public interface WeeklyReportRepository extends JpaRepository<WeeklyPerformanceR
 
     // Find reports by reviewer after a date
     List<WeeklyPerformanceReport> findByReviewerIdAndWeekStartDateAfter(UUID reviewerId, java.time.LocalDate startDate);
+
+    @Query("SELECT w FROM WeeklyPerformanceReport w WHERE w.teamReportUrl IS NOT NULL AND w.teamReportUrl <> '' " +
+           "AND w.weekStartDate BETWEEN :startDate AND :endDate ORDER BY w.weekStartDate DESC")
+    List<WeeklyPerformanceReport> findTeamReportsInRange(
+        @Param("startDate") java.time.LocalDate startDate,
+        @Param("endDate") java.time.LocalDate endDate
+    );
 }

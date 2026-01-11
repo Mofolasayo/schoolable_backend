@@ -312,9 +312,94 @@ public class AttendanceController {
         LocalDate end = LocalDate.parse(endDate);
         
         List<Attendance> records = attendanceRepository.findByDateRange(start, end);
-        List<Map<String, Object>> response = records.stream()
-                .map(this::buildAttendanceResponseWithUser)
-                .toList();
+        Map<String, Attendance> recordIndex = new HashMap<>();
+        for (Attendance record : records) {
+            if (record.getUserId() == null || record.getDate() == null) {
+                continue;
+            }
+            recordIndex.put(record.getUserId() + "|" + record.getDate(), record);
+        }
+
+        List<Map<String, Object>> response = new ArrayList<>();
+        for (Attendance record : records) {
+            response.add(buildAttendanceResponseWithUser(record));
+        }
+
+        List<Profile> staff = profileRepository.findByRoleNot("admin");
+        if (staff != null && !staff.isEmpty()) {
+            long syntheticId = -1;
+            LocalDate cursor = start;
+            while (!cursor.isAfter(end)) {
+                for (Profile profile : staff) {
+                    if (profile.getRole() != null) {
+                        String role = profile.getRole().toLowerCase(Locale.ROOT);
+                        if (role.equals("super_admin") || role.equals("superadmin")) {
+                            continue;
+                        }
+                    }
+                    AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(profile.getId(), cursor);
+                    if (!policy.isWorkDay() || policy.isHoliday() || policy.isOnLeave()) {
+                        continue;
+                    }
+                    String key = profile.getId() + "|" + cursor;
+                    if (recordIndex.containsKey(key)) {
+                        continue;
+                    }
+
+                    Map<String, Object> absent = new HashMap<>();
+                    absent.put("id", syntheticId--);
+                    absent.put("user_id", profile.getId());
+                    absent.put("check_in", null);
+                    absent.put("check_out", null);
+                    absent.put("date", cursor);
+                    absent.put("status", "absent");
+                    absent.put("location", null);
+                    absent.put("address", null);
+                    absent.put("latitude", null);
+                    absent.put("longitude", null);
+                    absent.put("accuracy", null);
+                    absent.put("photo_url", null);
+                    absent.put("is_remote", null);
+                    absent.put("office_location_id", null);
+                    absent.put("schedule_id", policy.schedule() != null ? policy.schedule().getId() : null);
+                    absent.put("expected_check_in", policy.schedule() != null ? policy.schedule().getStartTime() : null);
+                    absent.put("expected_check_out", policy.schedule() != null ? policy.schedule().getEndTime() : null);
+                    absent.put("face_match_score", null);
+                    absent.put("verification_status", null);
+                    absent.put("is_within_geofence", null);
+                    absent.put("distance_meters", null);
+                    absent.put("liveness_score", null);
+                    absent.put("liveness_type", null);
+                    absent.put("liveness_passed", null);
+                    absent.put("face_match_provider", null);
+                    absent.put("note", "Auto-marked absent");
+
+                    Map<String, Object> user = new HashMap<>();
+                    user.put("id", profile.getId());
+                    user.put("full_name", profile.getFullName());
+                    user.put("email", profile.getEmail());
+                    user.put("department", profile.getDepartment());
+                    user.put("job_title", profile.getJobTitle());
+                    user.put("avatar_url", getAvatarUrl(profile));
+                    absent.put("user", user);
+
+                    response.add(absent);
+                }
+                cursor = cursor.plusDays(1);
+            }
+        }
+
+        response.sort((a, b) -> {
+            LocalDate dateA = LocalDate.parse(String.valueOf(a.get("date")));
+            LocalDate dateB = LocalDate.parse(String.valueOf(b.get("date")));
+            int dateCompare = dateB.compareTo(dateA);
+            if (dateCompare != 0) {
+                return dateCompare;
+            }
+            OffsetDateTime checkInA = a.get("check_in") != null ? OffsetDateTime.parse(String.valueOf(a.get("check_in"))) : OffsetDateTime.MIN;
+            OffsetDateTime checkInB = b.get("check_in") != null ? OffsetDateTime.parse(String.valueOf(b.get("check_in"))) : OffsetDateTime.MIN;
+            return checkInB.compareTo(checkInA);
+        });
         
         return ResponseEntity.ok(response);
     }

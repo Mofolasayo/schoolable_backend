@@ -133,6 +133,14 @@ public interface DailyReportRepository extends JpaRepository<DailyReport, Long> 
         @Param("endDate") LocalDate endDate
     );
 
+    @Query("SELECT r FROM DailyReport r WHERE r.reportDate BETWEEN :startDate AND :endDate " +
+           "AND r.attachmentUrl IS NOT NULL AND r.attachmentUrl <> '' " +
+           "ORDER BY r.reportDate DESC")
+    List<DailyReport> findWithAttachmentsInRange(
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
     /**
      * Get report submission streak for an employee
      */
