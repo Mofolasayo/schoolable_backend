@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
+import com.schoolable.backend.hr.JobLevel;
 import com.schoolable.backend.storage.StorageService;
 
 import java.sql.Date;
@@ -136,6 +137,38 @@ public class ProfileController {
                 .toList();
 
         return ResponseEntity.ok(result);
+    }
+
+    @Operation(summary = "Get distinct departments")
+    @GetMapping("/departments")
+    public ResponseEntity<?> getDepartments(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        List<String> departments = profileRepository.findAllDepartments()
+                .stream()
+                .filter(dept -> dept != null && !dept.isBlank())
+                .toList();
+        return ResponseEntity.ok(Map.of("departments", departments));
+    }
+
+    @Operation(summary = "Get job level reference data")
+    @GetMapping("/job-levels")
+    public ResponseEntity<?> getJobLevels(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        List<Map<String, Object>> levels = jobLevelRepository.findAllByOrderByLevelNumberAsc()
+                .stream()
+                .map(level -> {
+                    Map<String, Object> dto = new HashMap<>();
+                    dto.put("levelNumber", level.getLevelNumber());
+                    dto.put("title", level.getTitle());
+                    dto.put("grade", level.getGrade());
+                    return dto;
+                })
+                .toList();
+        return ResponseEntity.ok(Map.of("jobLevels", levels));
     }
 
     @Operation(summary = "Complete profile after login")

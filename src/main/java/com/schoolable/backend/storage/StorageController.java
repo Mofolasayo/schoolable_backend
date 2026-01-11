@@ -1,5 +1,6 @@
 package com.schoolable.backend.storage;
 
+import com.schoolable.backend.config.FeatureFlags;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
@@ -17,9 +18,11 @@ import java.util.UUID;
 public class StorageController {
 
     private final StorageService storageService;
+    private final FeatureFlags featureFlags;
 
-    public StorageController(StorageService storageService) {
+    public StorageController(StorageService storageService, FeatureFlags featureFlags) {
         this.storageService = storageService;
+        this.featureFlags = featureFlags;
     }
 
     @Operation(summary = "Check if storage is available")
@@ -212,6 +215,10 @@ public class StorageController {
             @PathVariable String channelId,
             @RequestParam("file") MultipartFile file,
             Authentication auth) {
+
+        if (!featureFlags.isMessagingEnabled()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Messaging is disabled"));
+        }
         
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));

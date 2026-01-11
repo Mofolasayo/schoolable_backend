@@ -211,6 +211,86 @@ public class DailyReportController {
         ));
     }
 
+    @Operation(summary = "Get org-wide daily report stats (Admin)")
+    @GetMapping("/stats/org-wide")
+    public ResponseEntity<?> getOrgWideStats(
+            Authentication auth,
+            @RequestParam(required = false) String date) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        LocalDate targetDate = date != null ? LocalDate.parse(date) : LocalDate.now();
+
+        long submittedToday = Optional.ofNullable(dailyReportRepository.countByReportDate(targetDate)).orElse(0L);
+        long submittedYesterday = Optional.ofNullable(dailyReportRepository.countByReportDate(targetDate.minusDays(1))).orElse(0L);
+
+        long totalStaff = profileRepository.findAll().stream()
+            .filter(p -> p.getRole() == null || !p.getRole().toLowerCase().contains("admin"))
+            .count();
+
+        int trendChange = 0;
+        if (submittedYesterday > 0) {
+            trendChange = (int) Math.round(((submittedToday - submittedYesterday) * 100.0) / submittedYesterday);
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "date", targetDate.toString(),
+            "submittedToday", submittedToday,
+            "totalStaff", totalStaff,
+            "trendChange", trendChange
+        ));
+    }
+
+    @Operation(summary = "Get org-wide daily report stats range (Admin)")
+    @GetMapping("/stats/range")
+    public ResponseEntity<?> getOrgWideStatsRange(
+            Authentication auth,
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        LocalDate start = LocalDate.parse(startDate);
+        LocalDate end = LocalDate.parse(endDate);
+
+        long totalStaff = profileRepository.findAll().stream()
+            .filter(p -> p.getRole() == null || !p.getRole().toLowerCase().contains("admin"))
+            .count();
+
+        Map<LocalDate, Long> countsByDate = new HashMap<>();
+        for (Object[] row : dailyReportRepository.countByReportDateRange(start, end)) {
+            LocalDate date = (LocalDate) row[0];
+            Number count = (Number) row[1];
+            countsByDate.put(date, count != null ? count.longValue() : 0L);
+        }
+
+        List<Map<String, Object>> days = new ArrayList<>();
+        for (LocalDate cursor = start; !cursor.isAfter(end); cursor = cursor.plusDays(1)) {
+            long submitted = countsByDate.getOrDefault(cursor, 0L);
+            int submissionRate = totalStaff > 0 ? (int) Math.round((submitted * 100.0) / totalStaff) : 0;
+            days.add(Map.of(
+                "date", cursor.toString(),
+                "submitted", submitted,
+                "submissionRate", submissionRate
+            ));
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "startDate", startDate,
+            "endDate", endDate,
+            "totalStaff", totalStaff,
+            "days", days
+        ));
+    }
+
     // ==================== TEAM LEAD VIEWS ====================
 
     @Operation(summary = "Get team's daily reports (Team Lead)")
@@ -373,6 +453,18 @@ public class DailyReportController {
     }
 
     // ==================== HELPER METHODS ====================
+
+    private boolean isAdmin(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return false;
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+        Profile profile = profileRepository.findById(userId).orElse(null);
+        if (profile == null || profile.getRole() == null) {
+            return false;
+        }
+        return profile.getRole().toLowerCase().contains("admin");
+    }
 
     private Map<String, Object> toDto(DailyReport r) {
         Map<String, Object> dto = new LinkedHashMap<>();

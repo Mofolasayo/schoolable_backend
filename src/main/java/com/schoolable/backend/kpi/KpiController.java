@@ -363,6 +363,34 @@ public class KpiController {
         ));
     }
 
+    /**
+     * GET /api/kpi/insights/all
+     * Get all AI insights for a specific week (admin view)
+     */
+    @GetMapping("/insights/all")
+    public ResponseEntity<?> getAllWeeklyInsights(
+            Authentication auth,
+            @RequestParam(required = false) Integer weekNumber,
+            @RequestParam(required = false) Integer year) {
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        int targetWeek = weekNumber != null ? weekNumber : kpiService.getCurrentWeek();
+        int targetYear = year != null ? year : LocalDate.now().getYear();
+
+        List<AiInsight> insights = insightRepository.findAllWeeklyInsights(targetWeek, targetYear);
+        List<Map<String, Object>> formatted = insights.stream()
+            .map(this::formatInsight)
+            .toList();
+
+        return ResponseEntity.ok(Map.of(
+            "insights", formatted,
+            "weekNumber", targetWeek,
+            "year", targetYear
+        ));
+    }
+
     // ==================== TEAM SCORES ====================
 
     /**
@@ -449,6 +477,31 @@ public class KpiController {
             "teams", formattedScores,
             "totalTeams", scores.size(),
             "averageScore", Math.round(avgScore * 10) / 10.0
+        ));
+    }
+
+    /**
+     * GET /api/kpi/all-kpis
+     * Get all active team KPIs for a quarter (admin view)
+     */
+    @GetMapping("/all-kpis")
+    public ResponseEntity<?> getAllTeamKpis(
+            Authentication auth,
+            @RequestParam(required = false) String quarter,
+            @RequestParam(required = false) Integer year) {
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        if (quarter == null) quarter = kpiService.getCurrentQuarter();
+        if (year == null) year = LocalDate.now().getYear();
+
+        List<TeamKpi> kpis = teamKpiRepository.findAllActiveByQuarterAndYear(quarter, year);
+
+        return ResponseEntity.ok(Map.of(
+            "kpis", kpis,
+            "quarter", quarter,
+            "year", year
         ));
     }
 

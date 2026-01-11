@@ -105,6 +105,22 @@ public interface DailyReportRepository extends JpaRepository<DailyReport, Long> 
     boolean existsByEmployeeIdAndReportDate(UUID employeeId, LocalDate reportDate);
 
     /**
+     * Count reports submitted on a specific date (org-wide)
+     */
+    Long countByReportDate(LocalDate reportDate);
+
+    /**
+     * Count reports grouped by date within a range (org-wide)
+     */
+    @Query("SELECT r.reportDate, COUNT(r) FROM DailyReport r " +
+           "WHERE r.reportDate BETWEEN :startDate AND :endDate " +
+           "GROUP BY r.reportDate")
+    List<Object[]> countByReportDateRange(
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
+    /**
      * Find all reports for team members (by department)
      */
     @Query("SELECT r FROM DailyReport r, com.schoolable.backend.profile.Profile p " +

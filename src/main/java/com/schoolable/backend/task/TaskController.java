@@ -744,6 +744,7 @@ public class TaskController {
         response.put("progress", task.getProgress());
         response.put("created_by", task.getCreatedBy());
         response.put("created_at", task.getCreatedAt());
+        response.put("updated_at", task.getUpdatedAt());
         response.put("blocked_by_id", task.getBlockedById());
         response.put("is_blocked", task.isBlocked());
         response.put("recurring_template_id", task.getRecurringTemplateId());
