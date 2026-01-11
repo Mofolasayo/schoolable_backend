@@ -215,6 +215,15 @@ public class ReferenceDataController {
             Map.of("value", "upload", "label", "Document Upload"),
             Map.of("value", "training", "label", "Training Completion")
         ));
+        response.put("complianceCategories", List.of(
+            "Data Security",
+            "Health & Safety",
+            "HR Policies",
+            "Finance",
+            "IT Security",
+            "Operations",
+            "Legal"
+        ));
         response.put("reportTypes", List.of(
             Map.of("value", "All", "label", "All"),
             Map.of("value", "Department", "label", "Department"),

@@ -30,6 +30,12 @@ public class CompliancePolicy {
     
     @Column(nullable = false)
     private String type; // policy, upload, training
+
+    @Column(name = "file_url")
+    private String fileUrl;
+
+    @Column(name = "file_name")
+    private String fileName;
     
     private LocalDate deadline;
     
@@ -97,6 +103,22 @@ public class CompliancePolicy {
     
     public void setType(String type) {
         this.type = type;
+    }
+
+    public String getFileUrl() {
+        return fileUrl;
+    }
+
+    public void setFileUrl(String fileUrl) {
+        this.fileUrl = fileUrl;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
     }
     
     public LocalDate getDeadline() {

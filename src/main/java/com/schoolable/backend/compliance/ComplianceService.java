@@ -63,6 +63,8 @@ public class ComplianceService {
                     policy.setDepartment(updatedPolicy.getDepartment());
                     policy.setDescription(updatedPolicy.getDescription());
                     policy.setType(updatedPolicy.getType());
+                    policy.setFileUrl(updatedPolicy.getFileUrl());
+                    policy.setFileName(updatedPolicy.getFileName());
                     policy.setDeadline(updatedPolicy.getDeadline());
                     policy.setReviewFrequencyDays(updatedPolicy.getReviewFrequencyDays());
                     policy.setIsActive(updatedPolicy.getIsActive());
@@ -219,6 +221,8 @@ public class ComplianceService {
             detail.put("department", policy.getDepartment());
             detail.put("description", policy.getDescription());
             detail.put("type", policy.getType());
+            detail.put("fileUrl", policy.getFileUrl());
+            detail.put("fileName", policy.getFileName());
             detail.put("status", status);
             detail.put("complianceRate", Math.round(rate));
             detail.put("staffCount", total);
