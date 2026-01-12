@@ -394,7 +394,7 @@ public class WeeklyReportDto {
         @NotNull(message = "Year is required")
         private Integer year;
 
-        // Optional team report document URL
+        @NotBlank(message = "Team report document is required")
         private String teamReportUrl;
 
         @NotEmpty(message = "At least one report is required")

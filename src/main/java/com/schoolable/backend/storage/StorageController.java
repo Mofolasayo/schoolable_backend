@@ -209,6 +209,31 @@ public class StorageController {
         return ResponseEntity.ok(Map.of("deleted", deleted));
     }
 
+    @Operation(summary = "Unblock delivery for a Cloudinary asset URL")
+    @PostMapping("/delivery/unblock")
+    public ResponseEntity<?> unblockDelivery(
+            @RequestBody DeliveryUnblockRequest request,
+            Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        if (!storageService.isAvailable()) {
+            return ResponseEntity.status(503).body(Map.of("error", "Storage service not configured"));
+        }
+
+        String url = request.url();
+        if (url == null || url.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "URL is required"));
+        }
+
+        boolean success = storageService.unblockDelivery(url);
+        return ResponseEntity.ok(Map.of(
+            "success", success,
+            "url", url
+        ));
+    }
+
     @Operation(summary = "Upload a chat/message attachment")
     @PostMapping(value = "/chat/{channelId}/attachment", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadChatAttachment(
@@ -283,4 +308,6 @@ public class StorageController {
         String folder,
         String filename
     ) {}
+
+    public record DeliveryUnblockRequest(String url) {}
 }

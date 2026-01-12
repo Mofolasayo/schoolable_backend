@@ -61,6 +61,9 @@ public class KpiAnalysisService {
     @Autowired
     private TeamLeadRepository teamLeadRepository;
 
+    @Autowired
+    private TeamReportDocumentService teamReportDocumentService;
+
     // ==================== KPI MANAGEMENT ====================
 
     /**
@@ -349,15 +352,51 @@ public class KpiAnalysisService {
             ));
             aiResult.rawResponse = Map.of("error", "NO_WEEKLY_REPORTS");
         } else {
-            aiResult = geminiService.analyzeWeeklyProgressWithFeedback(
-                teamName,
-                teamLead.getDepartment(),
-                kpiData,
-                memberFeedback,
-                weekNumber,
-                year,
-                jobId
-            );
+            String teamReportUrl = memberFeedback.stream()
+                .map(feedback -> feedback.teamReportDocument)
+                .filter(url -> url != null && !url.isBlank())
+                .findFirst()
+                .orElse(null);
+
+            String teamReportText = null;
+            if (teamReportUrl != null) {
+                teamReportText = teamReportDocumentService.extractReportText(teamReportUrl).orElse(null);
+            }
+
+            if (teamReportUrl != null && (teamReportText == null || teamReportText.isBlank())) {
+                aiResult = new GeminiAiService.AiAnalysisResult();
+                aiResult.fallback = true;
+                aiResult.kpiScore = BigDecimal.ZERO;
+                aiResult.summary = "Team report document could not be accessed. Ensure the report is uploaded and publicly deliverable.";
+                aiResult.insights = Map.of(
+                    "topPerforming", List.of(),
+                    "needsAttention", List.of("Team report document could not be accessed."),
+                    "achievements", List.of(),
+                    "challenges", List.of("Report document is required for AI analysis.")
+                );
+                aiResult.recommendations = Map.of("items", List.of(
+                    "Re-upload the team report document and confirm it opens in the browser.",
+                    "Generate insights again after the document is accessible."
+                ));
+                aiResult.riskAlerts = Map.of("items", List.of(
+                    "Weekly report document unavailable; team score set to 0."
+                ));
+                Map<String, Object> rawResponse = new HashMap<>();
+                rawResponse.put("error", "REPORT_DOCUMENT_UNAVAILABLE");
+                rawResponse.put("teamReportUrl", teamReportUrl);
+                aiResult.rawResponse = rawResponse;
+            } else {
+                aiResult = geminiService.analyzeWeeklyProgressWithFeedback(
+                    teamName,
+                    teamLead.getDepartment(),
+                    kpiData,
+                    memberFeedback,
+                    teamReportText,
+                    weekNumber,
+                    year,
+                    jobId
+                );
+            }
         }
 
         // Save insight

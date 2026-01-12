@@ -143,6 +143,10 @@ public class WeeklyReportService {
             throw new RuntimeException("Only team leads can submit weekly reports");
         }
 
+        if (request.getTeamReportUrl() == null || request.getTeamReportUrl().isBlank()) {
+            throw new RuntimeException("Team report document is required");
+        }
+
         List<WeeklyPerformanceReport> existingReports = weeklyReportRepository
                 .findByReviewerIdAndWeekNumberAndYear(teamLeadId, request.getWeekNumber(), request.getYear());
         if (!existingReports.isEmpty()) {

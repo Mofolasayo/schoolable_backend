@@ -63,7 +63,7 @@ public class GeminiAiService {
     private final AiRequestLogRepository aiRequestLogRepository;
 
     private static final String PROMPT_VERSION_WEEKLY = "weekly-v2";
-    private static final String PROMPT_VERSION_WEEKLY_TEAM = "weekly-team-v2";
+    private static final String PROMPT_VERSION_WEEKLY_TEAM = "weekly-team-v3";
     private static final String PROMPT_VERSION_QUARTERLY = "quarterly-v2";
     private static final String PROMPT_VERSION_DAILY_REPORT = "daily-report-v2";
 
@@ -510,6 +510,7 @@ public class GeminiAiService {
             department,
             kpiData,
             memberFeedback,
+            null,
             weekNumber,
             year,
             null
@@ -521,11 +522,12 @@ public class GeminiAiService {
             String department,
             List<KpiProgressData> kpiData,
             List<TeamMemberFeedback> memberFeedback,
+            String teamReportText,
             int weekNumber,
             int year,
             UUID jobId) {
 
-        String prompt = buildEnhancedWeeklyAnalysisPrompt(teamName, department, kpiData, memberFeedback, weekNumber, year);
+        String prompt = buildEnhancedWeeklyAnalysisPrompt(teamName, department, kpiData, memberFeedback, teamReportText, weekNumber, year);
         GeminiResponse aiResponse = generateStructuredJson(
             prompt,
             insightsTemperature,
@@ -550,6 +552,7 @@ public class GeminiAiService {
             String department,
             List<KpiProgressData> kpiData,
             List<TeamMemberFeedback> memberFeedback,
+            String teamReportText,
             int weekNumber,
             int year) {
 
@@ -603,12 +606,22 @@ public class GeminiAiService {
             sb.append("\n(No individual member feedback data available for this week. Use KPI targets for baseline analysis.)\n");
         }
 
+        if (teamReportText != null && !teamReportText.isBlank()) {
+            sb.append("\n=== TEAM WEEKLY REPORT DOCUMENT (EXTRACTED TEXT) ===\n");
+            sb.append(teamReportText).append("\n");
+            sb.append("Use this document to validate KPI progress and score realism. If the document conflicts with KPI progress, adjust the score downward.\n");
+        } else {
+            sb.append("\n(No team report document text available for this week.)\n");
+        }
+
         sb.append("\n=== ADDITIONAL CONTEXT ===\n");
         sb.append("- The Team Lead has uploaded supplementary documents (e.g., CVs or Work Plans). Explicitly mention these in your summary if relevant to the employee's growth or performance.\n");
         sb.append("- Your goal is to provide HIGHLY DETAILED, STRATEGIC insights. Avoid generic phrases.\n\n");
 
         sb.append("=== INSTRUCTIONS ===\n");
-        sb.append("1. Calculate a KPI score (0-100) based on weighted KPI progress.\n");
+        sb.append("1. Start with the weighted KPI progress score (0-100).\n");
+        sb.append("   - If the weekly report document lacks evidence for the claimed progress, adjust the score downward.\n");
+        sb.append("   - Never increase the score above the weighted KPI progress.\n");
         sb.append("2. Provide a 3-4 sentence summary that sounds like a senior management consultant. Reference employees by name and link their soft skill ratings (Initiative/Teamwork) to their actual KPI results.\n");
         sb.append("3. If an uploaded document (e.g., a CV) is mentioned for an employee, provide a personalized recommendation like 'Leverage the skills identified in [Document Name] to bridge the current gap in [Specific KPI]'.\n");
         sb.append("4. TOP PERFORMING: List 2-3 specific achievements using metrics.\n");
@@ -1024,10 +1037,21 @@ public class GeminiAiService {
 
             JsonNode json = objectMapper.readTree(cleanResponse);
 
-            // Extract kpiScore but rely on deterministic scoring for grading
-            double aiKpiScore = json.path("kpiScore").asDouble(0);
+            // Extract kpiScore and clamp to deterministic KPI progress
+            double aiKpiScore = json.path("kpiScore").asDouble(Double.NaN);
             BigDecimal manualScore = calculateManualScore(kpiData);
-            result.kpiScore = manualScore;
+            double manualScoreValue = manualScore != null ? manualScore.doubleValue() : 0.0;
+            double finalScore = Double.isNaN(aiKpiScore) ? manualScoreValue : aiKpiScore;
+            if (finalScore > manualScoreValue) {
+                finalScore = manualScoreValue;
+            }
+            if (finalScore < 0) {
+                finalScore = 0;
+            }
+            if (finalScore > 100) {
+                finalScore = 100;
+            }
+            result.kpiScore = BigDecimal.valueOf(finalScore).setScale(2, RoundingMode.HALF_UP);
 
             // Extract summary
             result.summary = json.path("summary").asText("No summary available");
@@ -1069,6 +1093,7 @@ public class GeminiAiService {
             Map<String, Object> rawResponse = objectMapper.convertValue(json, Map.class);
             rawResponse.put("aiKpiScore", aiKpiScore);
             rawResponse.put("manualKpiScore", manualScore);
+            rawResponse.put("finalKpiScore", result.kpiScore);
             result.rawResponse = rawResponse;
 
             return result;

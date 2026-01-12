@@ -10,9 +10,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Service for handling file uploads using Cloudinary.
@@ -79,9 +82,17 @@ public class StorageService {
         );
         if (isPublicFolder(folder)) {
             options.put("access_mode", "public");
+            options.put("access_control", List.of(ObjectUtils.asMap("access_type", "anonymous")));
         }
 
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), options);
+
+        if (isPublicFolder(folder)) {
+            String publicId = (String) uploadResult.get("public_id");
+            String resourceType = (String) uploadResult.get("resource_type");
+            String type = (String) uploadResult.get("type");
+            publicizeAsset(publicId, resourceType, type);
+        }
 
         Map<String, Object> response = new HashMap<>();
         response.put("url", uploadResult.get("secure_url"));
@@ -100,6 +111,130 @@ public class StorageService {
         if (folder == null) return false;
         String normalized = folder.toLowerCase(Locale.ROOT);
         return normalized.contains("weekly-report");
+    }
+
+    public String ensurePublicDelivery(String assetUrl) {
+        if (cloudinary == null || assetUrl == null || assetUrl.isBlank()) {
+            return assetUrl;
+        }
+
+        CloudinaryAsset asset = CloudinaryAsset.fromUrl(assetUrl);
+        if (asset == null) {
+            return assetUrl;
+        }
+
+        publicizeAsset(asset.publicId, asset.resourceType, asset.type);
+
+        return assetUrl;
+    }
+
+    public boolean unblockDelivery(String assetUrl) {
+        if (cloudinary == null || assetUrl == null || assetUrl.isBlank()) {
+            return false;
+        }
+
+        CloudinaryAsset asset = CloudinaryAsset.fromUrl(assetUrl);
+        if (asset == null) {
+            return false;
+        }
+
+        return publicizeAsset(asset.publicId, asset.resourceType, asset.type);
+    }
+
+    private boolean publicizeAsset(String publicId, String resourceType, String type) {
+        if (publicId == null || publicId.isBlank()) {
+            return false;
+        }
+
+        String resolvedType = (type == null || type.isBlank()) ? "upload" : type;
+        String resolvedResource = (resourceType == null || resourceType.isBlank()) ? "image" : resourceType;
+
+        Map<String, Object> options = ObjectUtils.asMap(
+            "type", resolvedType,
+            "resource_type", resolvedResource,
+            "access_mode", "public",
+            "access_control", List.of(ObjectUtils.asMap("access_type", "anonymous")),
+            "invalidate", true
+        );
+
+        try {
+            cloudinary.uploader().explicit(publicId, options);
+            return true;
+        } catch (Exception e) {
+            log.warn("Failed to update access control for {}: {}", publicId, e.getMessage());
+            return false;
+        }
+    }
+
+    private static class CloudinaryAsset {
+        private static final Pattern URL_PATTERN = Pattern.compile(
+            "https?://res\\.cloudinary\\.com/[^/]+/([^/]+)/([^/]+)/(.+)"
+        );
+
+        private final String resourceType;
+        private final String type;
+        private final String publicId;
+
+        private CloudinaryAsset(String resourceType, String type, String publicId) {
+            this.resourceType = resourceType;
+            this.type = type;
+            this.publicId = publicId;
+        }
+
+        static CloudinaryAsset fromUrl(String url) {
+            Matcher matcher = URL_PATTERN.matcher(url);
+            if (!matcher.find()) {
+                return null;
+            }
+
+            String resourceType = matcher.group(1);
+            String type = matcher.group(2);
+            String path = matcher.group(3);
+
+            int queryIndex = path.indexOf('?');
+            if (queryIndex >= 0) {
+                path = path.substring(0, queryIndex);
+            }
+
+            String[] parts = path.split("/");
+            int versionIndex = -1;
+            for (int i = 0; i < parts.length; i++) {
+                if (parts[i].matches("v\\d+")) {
+                    versionIndex = i;
+                    break;
+                }
+            }
+            if (versionIndex >= 0 && versionIndex + 1 < parts.length) {
+                StringBuilder builder = new StringBuilder();
+                for (int i = versionIndex + 1; i < parts.length; i++) {
+                    if (builder.length() > 0) {
+                        builder.append('/');
+                    }
+                    builder.append(parts[i]);
+                }
+                path = builder.toString();
+            } else if (parts.length > 0) {
+                StringBuilder builder = new StringBuilder();
+                for (int i = 0; i < parts.length; i++) {
+                    if (builder.length() > 0) {
+                        builder.append('/');
+                    }
+                    builder.append(parts[i]);
+                }
+                path = builder.toString();
+            }
+
+            int dotIndex = path.lastIndexOf('.');
+            if (dotIndex > 0) {
+                path = path.substring(0, dotIndex);
+            }
+
+            if (path.isBlank()) {
+                return null;
+            }
+
+            return new CloudinaryAsset(resourceType, type, path);
+        }
     }
 
     /**
