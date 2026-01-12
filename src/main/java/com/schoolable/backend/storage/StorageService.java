@@ -10,6 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -76,6 +77,9 @@ public class StorageService {
             "public_id", uniqueId,
             "resource_type", "auto" // Automatically detect image/video/raw
         );
+        if (isPublicFolder(folder)) {
+            options.put("access_mode", "public");
+        }
 
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), options);
 
@@ -90,6 +94,12 @@ public class StorageService {
         response.put("originalFilename", originalFilename);
 
         return response;
+    }
+
+    private boolean isPublicFolder(String folder) {
+        if (folder == null) return false;
+        String normalized = folder.toLowerCase(Locale.ROOT);
+        return normalized.contains("weekly-report");
     }
 
     /**

@@ -322,18 +322,43 @@ public class KpiAnalysisService {
             }
         }
 
-        // Call AI service with enhanced context
+        // Call AI service with enhanced context (or strict fallback if no reports)
         String teamName = resolveTeamName(teamLead);
-
-        GeminiAiService.AiAnalysisResult aiResult = geminiService.analyzeWeeklyProgressWithFeedback(
-            teamName,
-            teamLead.getDepartment(),
-            kpiData,
-            memberFeedback,
-            weekNumber,
-            year,
-            jobId
-        );
+        GeminiAiService.AiAnalysisResult aiResult;
+        if (memberFeedback.isEmpty()) {
+            aiResult = new GeminiAiService.AiAnalysisResult();
+            aiResult.fallback = true;
+            aiResult.kpiScore = BigDecimal.ZERO;
+            aiResult.summary = String.format(
+                "No weekly reports were submitted for Week %d. Team score is 0 until reports are submitted.",
+                weekNumber
+            );
+            aiResult.insights = Map.of(
+                "topPerforming", List.of(),
+                "needsAttention", List.of("No weekly reports submitted for this week."),
+                "achievements", List.of(),
+                "challenges", List.of("Weekly report coverage is 0%.")
+            );
+            aiResult.recommendations = Map.of("items", List.of(
+                "Submit weekly reports for every team member before generating insights.",
+                "Include highlights and focus areas to improve KPI guidance.",
+                "Upload the team summary document to provide context."
+            ));
+            aiResult.riskAlerts = Map.of("items", List.of(
+                "No weekly reports submitted; team score set to 0."
+            ));
+            aiResult.rawResponse = Map.of("error", "NO_WEEKLY_REPORTS");
+        } else {
+            aiResult = geminiService.analyzeWeeklyProgressWithFeedback(
+                teamName,
+                teamLead.getDepartment(),
+                kpiData,
+                memberFeedback,
+                weekNumber,
+                year,
+                jobId
+            );
+        }
 
         // Save insight
         AiInsight insight = new AiInsight();
@@ -478,17 +503,30 @@ public class KpiAnalysisService {
             ));
         }
 
-        // Get AI analysis
+        // Get AI analysis (skip if there is no KPI progress submitted for the quarter)
         String teamName = resolveTeamName(teamLead);
-
-        GeminiAiService.AiAnalysisResult aiResult = geminiService.analyzeQuarterlyPerformance(
-            teamName,
-            teamLead.getDepartment(),
-            kpiData,
-            quarter,
-            year,
-            jobId
-        );
+        boolean hasProgress = !progressRepository.findAllByTeamLeadAndQuarter(teamLeadId, quarter, year).isEmpty();
+        GeminiAiService.AiAnalysisResult aiResult;
+        if (!hasProgress) {
+            aiResult = new GeminiAiService.AiAnalysisResult();
+            aiResult.fallback = true;
+            aiResult.kpiScore = BigDecimal.ZERO;
+            aiResult.summary = String.format(
+                "No KPI progress has been reported for %s %d. Team score is 0 until progress is submitted.",
+                quarter,
+                year
+            );
+            aiResult.rawResponse = Map.of("error", "NO_KPI_PROGRESS");
+        } else {
+            aiResult = geminiService.analyzeQuarterlyPerformance(
+                teamName,
+                teamLead.getDepartment(),
+                kpiData,
+                quarter,
+                year,
+                jobId
+            );
+        }
 
         // Find or create quarterly score
         TeamQuarterlyScore score = quarterlyScoreRepository

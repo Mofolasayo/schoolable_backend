@@ -615,6 +615,10 @@ public class GeminiAiService {
         sb.append("5. NEEDS ATTENTION: Focus on behavioral or technical blockers identified in the ratings.\n");
         sb.append("6. RECOMMENDATIONS: Provide 3-4 actionable, high-impact strategies for next week.\n");
         sb.append("7. RISK ALERTS: Identify any 'silent risks' like stable but low engagement scores.\n\n");
+        sb.append("SCORING RULES (STRICT):\n");
+        sb.append("- If no weekly reports are submitted, set KPI score to 0.\n");
+        sb.append("- If KPI progress is below 60%, score that KPI as 20 points (At Risk).\n");
+        sb.append("- Do not inflate scores for vague or minimal reports.\n\n");
 
         sb.append("RESPOND IN THIS EXACT JSON FORMAT (no markdown, no preamble):\n");
         sb.append("{\n");
@@ -666,7 +670,7 @@ public class GeminiAiService {
         sb.append("- 80-89% achieved = 80 points (Good)\n");
         sb.append("- 70-79% achieved = 70 points (Satisfactory)\n");
         sb.append("- 60-69% achieved = 60 points (Needs Improvement)\n");
-        sb.append("- Below 60% achieved = 50 points (At Risk)\n");
+        sb.append("- Below 60% achieved = 20 points (At Risk)\n");
         sb.append("- Final Score = Sum of (KPI Score × KPI Weight)\n\n");
 
         sb.append("RESPOND IN THIS EXACT JSON FORMAT (no markdown, just JSON):\n");
@@ -1020,8 +1024,10 @@ public class GeminiAiService {
 
             JsonNode json = objectMapper.readTree(cleanResponse);
 
-            // Extract kpiScore
-            result.kpiScore = BigDecimal.valueOf(json.path("kpiScore").asDouble(0));
+            // Extract kpiScore but rely on deterministic scoring for grading
+            double aiKpiScore = json.path("kpiScore").asDouble(0);
+            BigDecimal manualScore = calculateManualScore(kpiData);
+            result.kpiScore = manualScore;
 
             // Extract summary
             result.summary = json.path("summary").asText("No summary available");
@@ -1059,8 +1065,11 @@ public class GeminiAiService {
             }
             result.riskAlerts = risks;
 
-            // Store raw response
-            result.rawResponse = objectMapper.convertValue(json, Map.class);
+            // Store raw response with both AI and manual scores for auditability
+            Map<String, Object> rawResponse = objectMapper.convertValue(json, Map.class);
+            rawResponse.put("aiKpiScore", aiKpiScore);
+            rawResponse.put("manualKpiScore", manualScore);
+            result.rawResponse = rawResponse;
 
             return result;
         } catch (Exception e) {
@@ -1147,7 +1156,7 @@ public class GeminiAiService {
             else if (progress >= 80) kpiScore = 80;
             else if (progress >= 70) kpiScore = 70;
             else if (progress >= 60) kpiScore = 60;
-            else kpiScore = 50;
+            else kpiScore = 20;
 
             totalScore += kpiScore * (kpi.weight / 100.0);
             totalWeight += kpi.weight;
