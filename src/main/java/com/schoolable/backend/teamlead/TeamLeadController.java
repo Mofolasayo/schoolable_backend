@@ -6,6 +6,7 @@ import com.schoolable.backend.performance.PeerHelpfulnessRating;
 import com.schoolable.backend.performance.PeerHelpfulnessRepository;
 import com.schoolable.backend.performance.WeeklyPerformanceReport;
 import com.schoolable.backend.performance.WeeklyReportRepository;
+import com.schoolable.backend.performance.WeeklyReportService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.task.TaskRepository;
@@ -38,6 +39,7 @@ public class TeamLeadController {
     private final ProfileRepository profileRepository;
     private final TaskRepository taskRepository;
     private final WeeklyReportRepository weeklyReportRepository;
+    private final WeeklyReportService weeklyReportService;
     private final AuraDashboardService auraDashboardService;
     private final PeerHelpfulnessRepository peerHelpfulnessRepository;
 
@@ -47,12 +49,14 @@ public class TeamLeadController {
             ProfileRepository profileRepository,
             TaskRepository taskRepository,
             WeeklyReportRepository weeklyReportRepository,
+            WeeklyReportService weeklyReportService,
             AuraDashboardService auraDashboardService,
             PeerHelpfulnessRepository peerHelpfulnessRepository,
             com.schoolable.backend.kpi.TeamAiInsightsService teamAiInsightsService) {
         this.profileRepository = profileRepository;
         this.taskRepository = taskRepository;
         this.weeklyReportRepository = weeklyReportRepository;
+        this.weeklyReportService = weeklyReportService;
         this.auraDashboardService = auraDashboardService;
         this.peerHelpfulnessRepository = peerHelpfulnessRepository;
         this.teamAiInsightsService = teamAiInsightsService;
@@ -526,6 +530,47 @@ public class TeamLeadController {
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Failed to fetch report history: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Weekly report details for a specific week/year for the current team lead.
+     */
+    @Operation(summary = "Get weekly report details")
+    @GetMapping("/weekly-reports")
+    public ResponseEntity<?> getWeeklyReportDetails(
+            Authentication auth,
+            @RequestParam Integer week,
+            @RequestParam Integer year) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        try {
+            UUID teamLeadId = (UUID) auth.getPrincipal();
+
+            var profileOpt = profileRepository.findById(teamLeadId);
+            if (profileOpt.isEmpty()) {
+                return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+            }
+
+            Profile teamLead = profileOpt.get();
+            if (!Boolean.TRUE.equals(teamLead.getIsTeamLead()) && !"admin".equalsIgnoreCase(teamLead.getRole())) {
+                return ResponseEntity.status(403).body(Map.of("error", "Access denied. Team Lead role required."));
+            }
+
+            var reports = weeklyReportService.getTeamLeadWeeklyReports(teamLeadId, week, year);
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("teamLeadId", teamLeadId);
+            response.put("weekNumber", week);
+            response.put("year", year);
+            response.put("count", reports.size());
+            response.put("reports", reports);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to fetch weekly report details: " + e.getMessage()));
         }
     }
 

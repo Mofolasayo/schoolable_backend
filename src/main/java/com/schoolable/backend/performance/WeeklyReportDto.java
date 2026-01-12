@@ -211,6 +211,7 @@ public class WeeklyReportDto {
         // Metadata
         private String reviewerName;
         private String createdAt;
+        private String teamReportUrl;
 
         // Getters and Setters
         public Long getId() { return id; }
@@ -290,6 +291,9 @@ public class WeeklyReportDto {
 
         public String getCreatedAt() { return createdAt; }
         public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+
+        public String getTeamReportUrl() { return teamReportUrl; }
+        public void setTeamReportUrl(String teamReportUrl) { this.teamReportUrl = teamReportUrl; }
     }
 
     /**
@@ -455,4 +459,3 @@ public class WeeklyReportDto {
         public void setAreasForFocus(String areasForFocus) { this.areasForFocus = areasForFocus; }
     }
 }
-

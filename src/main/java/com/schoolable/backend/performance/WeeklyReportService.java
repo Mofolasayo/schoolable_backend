@@ -373,6 +373,7 @@ public class WeeklyReportService {
 
         response.setReviewerName(reviewer != null ? reviewer.getFullName() : null);
         response.setCreatedAt(report.getCreatedAt() != null ? report.getCreatedAt().toString() : null);
+        response.setTeamReportUrl(report.getTeamReportUrl());
 
         return response;
     }

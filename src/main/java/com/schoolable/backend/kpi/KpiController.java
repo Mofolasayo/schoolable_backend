@@ -291,15 +291,25 @@ public class KpiController {
             if (weekNumber == null) weekNumber = kpiService.getCurrentWeek();
             if (year == null) year = LocalDate.now().getYear();
 
-            var job = kpiService.enqueueWeeklyInsight(userId, weekNumber, year, userId);
-
-            return ResponseEntity.accepted().body(Map.of(
-                "success", true,
-                "message", "AI insight queued",
-                "jobId", job.getId(),
-                "weekNumber", weekNumber,
-                "year", year
-            ));
+            try {
+                var job = kpiService.enqueueWeeklyInsight(userId, weekNumber, year, userId);
+                return ResponseEntity.accepted().body(Map.of(
+                    "success", true,
+                    "message", "AI insight queued",
+                    "jobId", job.getId(),
+                    "weekNumber", weekNumber,
+                    "year", year
+                ));
+            } catch (Exception enqueueError) {
+                AiInsight insight = kpiService.generateWeeklyInsight(userId, weekNumber, year, null, userId);
+                return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "AI insight generated",
+                    "insight", formatInsight(insight),
+                    "weekNumber", weekNumber,
+                    "year", year
+                ));
+            }
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of(
                 "success", false,

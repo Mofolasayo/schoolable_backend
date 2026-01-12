@@ -354,6 +354,7 @@ public class KpiAnalysisService {
         insight.setAiRequestId(aiResult.requestId);
         insight.setAiJobId(jobId);
         insight.setGeneratedBy(requestedBy);
+        insight.setGenerationStatus(aiResult.fallback ? "FALLBACK" : "COMPLETED");
 
         return insightRepository.save(insight);
     }

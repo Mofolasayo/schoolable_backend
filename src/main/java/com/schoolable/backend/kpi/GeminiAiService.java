@@ -909,7 +909,12 @@ public class GeminiAiService {
         logEntry.setErrorMessage(errorMessage);
         logEntry.setCreatedAt(OffsetDateTime.now());
 
-        return aiRequestLogRepository.save(logEntry).getId();
+        try {
+            return aiRequestLogRepository.save(logEntry).getId();
+        } catch (Exception e) {
+            log.warn("Failed to persist AI request log: {}", e.getMessage());
+            return null;
+        }
     }
 
     private JsonNode toJsonNode(String payload) {
@@ -998,20 +1003,12 @@ public class GeminiAiService {
      * Parse AI response into structured result
      */
     private AiAnalysisResult parseAiResponse(String aiResponse, List<KpiProgressData> kpiData) {
-        AiAnalysisResult result = new AiAnalysisResult();
-
         if (aiResponse == null || aiResponse.isEmpty()) {
-            // Fallback: calculate score manually
-            result.kpiScore = calculateManualScore(kpiData);
-            result.summary = "Unable to generate AI insights. Score calculated based on KPI progress.";
-            result.insights = Map.of("status", "AI unavailable");
-            result.recommendations = Map.of("items", List.of("Review KPI progress manually"));
-            result.riskAlerts = Map.of("items", List.of());
-            result.rawResponse = Map.of("error", "No AI response");
-            return result;
+            return buildFallbackResult(kpiData, "No AI response");
         }
 
         try {
+            AiAnalysisResult result = new AiAnalysisResult();
             // Clean the response (remove markdown if present)
             String cleanResponse = aiResponse.trim();
             // Robust JSON extraction
@@ -1020,7 +1017,7 @@ public class GeminiAiService {
             if (firstOpen != -1 && lastClose != -1 && lastClose > firstOpen) {
                 cleanResponse = cleanResponse.substring(firstOpen, lastClose + 1);
             }
-            
+
             JsonNode json = objectMapper.readTree(cleanResponse);
 
             // Extract kpiScore
@@ -1065,17 +1062,59 @@ public class GeminiAiService {
             // Store raw response
             result.rawResponse = objectMapper.convertValue(json, Map.class);
 
+            return result;
         } catch (Exception e) {
             log.warn("Error parsing AI response: {}", e.getMessage());
-            // Fallback
-            result.kpiScore = calculateManualScore(kpiData);
-            result.summary = aiResponse.length() > 200 ? aiResponse.substring(0, 200) : aiResponse;
-            result.insights = Map.of("raw", aiResponse);
-            result.recommendations = Map.of("items", List.of());
-            result.riskAlerts = Map.of("items", List.of());
-            result.rawResponse = Map.of("rawText", aiResponse);
+            return buildFallbackResult(kpiData, "AI response parsing failed: " + e.getMessage());
         }
+    }
 
+    private AiAnalysisResult buildFallbackResult(List<KpiProgressData> kpiData, String reason) {
+        AiAnalysisResult result = new AiAnalysisResult();
+        result.fallback = true;
+        result.kpiScore = calculateManualScore(kpiData);
+
+        List<KpiProgressData> sorted = new ArrayList<>(kpiData);
+        sorted.sort(Comparator.comparingDouble(kpi -> kpi.progressPercentage));
+
+        List<String> needsAttention = sorted.stream()
+            .limit(2)
+            .map(kpi -> String.format("%s (%.1f%%)", kpi.kpiName, kpi.progressPercentage))
+            .toList();
+
+        List<String> topPerforming = sorted.stream()
+            .sorted(Comparator.comparingDouble((KpiProgressData kpi) -> kpi.progressPercentage).reversed())
+            .limit(2)
+            .map(kpi -> String.format("%s (%.1f%%)", kpi.kpiName, kpi.progressPercentage))
+            .toList();
+
+        double overallScore = result.kpiScore != null ? result.kpiScore.doubleValue() : 0.0;
+        result.summary = String.format(
+            "Overall KPI progress is %.1f%% toward quarter goals. Strongest KPIs: %s. KPIs needing attention: %s.",
+            overallScore,
+            topPerforming.isEmpty() ? "none yet" : String.join(", ", topPerforming),
+            needsAttention.isEmpty() ? "none yet" : String.join(", ", needsAttention)
+        );
+
+        result.insights = Map.of(
+            "topPerforming", topPerforming,
+            "needsAttention", needsAttention,
+            "achievements", topPerforming,
+            "challenges", needsAttention
+        );
+        result.recommendations = Map.of("items", List.of(
+            "Review weekly reports to validate KPI blockers and unblock dependencies.",
+            "Align next-week priorities with the lowest-progress KPIs.",
+            "Confirm KPI targets are still realistic for the current quarter pace."
+        ));
+
+        List<String> riskAlerts = sorted.stream()
+            .filter(kpi -> kpi.progressPercentage < 60.0)
+            .map(kpi -> String.format("%s below 60%% progress", kpi.kpiName))
+            .toList();
+
+        result.riskAlerts = Map.of("items", riskAlerts);
+        result.rawResponse = Map.of("error", reason, "fallback", true);
         return result;
     }
 
@@ -1187,6 +1226,7 @@ public class GeminiAiService {
         public String promptVersion;
         public String modelUsed;
         public boolean cacheHit;
+        public boolean fallback;
     }
 
     /**
