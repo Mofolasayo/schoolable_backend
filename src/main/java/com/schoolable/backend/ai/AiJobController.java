@@ -62,6 +62,5 @@ public class AiJobController {
         }
         String employeeId = payload.path("employeeId").asText(null);
         return employeeId != null && requesterId.toString().equals(employeeId);
-        return false;
     }
 }
