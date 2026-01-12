@@ -6,6 +6,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -37,17 +38,17 @@ public class AiJobController {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
-        return ResponseEntity.ok(Map.of(
-            "id", job.getId(),
-            "jobType", job.getJobType(),
-            "status", job.getStatus(),
-            "attempts", job.getAttempts(),
-            "maxAttempts", job.getMaxAttempts(),
-            "nextRunAt", job.getNextRunAt(),
-            "lastError", job.getLastError(),
-            "createdAt", job.getCreatedAt(),
-            "updatedAt", job.getUpdatedAt()
-        ));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", job.getId());
+        payload.put("jobType", job.getJobType());
+        payload.put("status", job.getStatus());
+        payload.put("attempts", job.getAttempts());
+        payload.put("maxAttempts", job.getMaxAttempts());
+        payload.put("nextRunAt", job.getNextRunAt());
+        payload.put("lastError", job.getLastError());
+        payload.put("createdAt", job.getCreatedAt());
+        payload.put("updatedAt", job.getUpdatedAt());
+        return ResponseEntity.ok(payload);
     }
 
     private boolean isOwner(AiJob job, UUID requesterId) {
