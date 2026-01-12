@@ -143,6 +143,12 @@ public class WeeklyReportService {
             throw new RuntimeException("Only team leads can submit weekly reports");
         }
 
+        List<WeeklyPerformanceReport> existingReports = weeklyReportRepository
+                .findByReviewerIdAndWeekNumberAndYear(teamLeadId, request.getWeekNumber(), request.getYear());
+        if (!existingReports.isEmpty()) {
+            throw new RuntimeException("Weekly reports already submitted for this week");
+        }
+
         // Calculate week dates
         LocalDate weekStart = getWeekStartDate(request.getYear(), request.getWeekNumber());
         LocalDate weekEnd = weekStart.plusDays(6);

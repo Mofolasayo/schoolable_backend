@@ -1,6 +1,9 @@
 package com.schoolable.backend.ai;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -23,8 +26,9 @@ public class AiJob {
     @Column(name = "job_type", nullable = false, length = 50)
     private String jobType;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb", nullable = false)
-    private String payload;
+    private JsonNode payload;
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20, nullable = false)
@@ -60,8 +64,8 @@ public class AiJob {
     public String getJobType() { return jobType; }
     public void setJobType(String jobType) { this.jobType = jobType; }
 
-    public String getPayload() { return payload; }
-    public void setPayload(String payload) { this.payload = payload; }
+    public JsonNode getPayload() { return payload; }
+    public void setPayload(JsonNode payload) { this.payload = payload; }
 
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }

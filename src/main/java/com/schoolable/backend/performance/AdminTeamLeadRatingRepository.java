@@ -32,6 +32,9 @@ public interface AdminTeamLeadRatingRepository extends JpaRepository<AdminTeamLe
     // Get all team lead ratings for a week
     List<AdminTeamLeadRating> findByWeekNumberAndYearOrderByCreatedAtDesc(Integer weekNumber, Integer year);
 
+    // Get most recent ratings for activity feed
+    List<AdminTeamLeadRating> findTop10ByOrderByCreatedAtDesc();
+
     // Get average scores for a team lead
     @Query("SELECT AVG(r.leadershipScore) FROM AdminTeamLeadRating r WHERE r.teamLeadId = :teamLeadId AND r.year = :year")
     Double getAverageLeadershipScore(@Param("teamLeadId") UUID teamLeadId, @Param("year") Integer year);

@@ -50,7 +50,9 @@ public class AiJobProcessor {
         aiJobRepository.save(job);
 
         try {
-            Map<String, Object> payload = objectMapper.readValue(job.getPayload(), new TypeReference<>() {});
+            Map<String, Object> payload = job.getPayload() == null
+                ? Map.of()
+                : objectMapper.convertValue(job.getPayload(), new TypeReference<>() {});
             switch (job.getJobType()) {
                 case AiJobTypes.DAILY_REPORT_GRADE -> dailyReportAiService.processDailyReportJob(job.getId(), payload);
                 case AiJobTypes.KPI_WEEKLY_INSIGHT -> kpiAnalysisService.processWeeklyInsightJob(job.getId(), payload);

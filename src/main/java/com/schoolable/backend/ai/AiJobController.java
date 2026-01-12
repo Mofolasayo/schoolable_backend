@@ -1,7 +1,6 @@
 package com.schoolable.backend.ai;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -15,10 +14,8 @@ import java.util.UUID;
 public class AiJobController {
 
     private final AiJobRepository aiJobRepository;
-    private final ObjectMapper objectMapper;
-    public AiJobController(AiJobRepository aiJobRepository, ObjectMapper objectMapper) {
+    public AiJobController(AiJobRepository aiJobRepository) {
         this.aiJobRepository = aiJobRepository;
-        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/{id}")
@@ -54,18 +51,17 @@ public class AiJobController {
     }
 
     private boolean isOwner(AiJob job, UUID requesterId) {
-        try {
-            Map<String, Object> payload = objectMapper.readValue(job.getPayload(), new TypeReference<>() {});
-            Object requestedBy = payload.get("requestedBy");
-            if (requestedBy != null && requesterId.toString().equals(requestedBy.toString())) {
-                return true;
-            }
-            Object employeeId = payload.get("employeeId");
-            if (employeeId != null && requesterId.toString().equals(employeeId.toString())) {
-                return true;
-            }
-        } catch (Exception ignored) {
+        JsonNode payload = job.getPayload();
+        if (payload == null || payload.isNull()) {
+            return false;
         }
+
+        String requestedBy = payload.path("requestedBy").asText(null);
+        if (requestedBy != null && requesterId.toString().equals(requestedBy)) {
+            return true;
+        }
+        String employeeId = payload.path("employeeId").asText(null);
+        return employeeId != null && requesterId.toString().equals(employeeId);
         return false;
     }
 }

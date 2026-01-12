@@ -1,6 +1,6 @@
 package com.schoolable.backend.ai;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -28,11 +28,7 @@ public class AiJobService {
         return aiJobRepository.save(job);
     }
 
-    private String serializePayload(Map<String, Object> payload) {
-        try {
-            return objectMapper.writeValueAsString(payload);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Failed to serialize AI job payload", e);
-        }
+    private JsonNode serializePayload(Map<String, Object> payload) {
+        return objectMapper.valueToTree(payload);
     }
 }

@@ -8,9 +8,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.*;
+import java.util.Locale;
 import java.util.*;
 
 /**
@@ -37,7 +39,7 @@ public class SmartRemindersController {
     @GetMapping
     public ResponseEntity<?> getReminders(Authentication auth) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -67,7 +69,7 @@ public class SmartRemindersController {
             Authentication auth
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -76,11 +78,11 @@ public class SmartRemindersController {
         reminder.setDescription(req.description);
         reminder.setType(req.type);
         reminder.setScheduleTime(req.scheduleTime);
-        reminder.setScheduleDays(String.join(",", req.scheduleDays));
+        reminder.setScheduleDays(String.join(",", req.scheduleDays != null ? req.scheduleDays : List.of()));
         reminder.setTimezone(req.timezone != null ? req.timezone : "Africa/Lagos");
         reminder.setTargetAudience(req.targetAudience);
         reminder.setMessage(req.message);
-        reminder.setChannels(String.join(",", req.channels));
+        reminder.setChannels("push");
         reminder.setActive(true);
         reminder.setTriggerCount(0);
         reminder.setCreatedAt(OffsetDateTime.now());
@@ -105,7 +107,7 @@ public class SmartRemindersController {
             Authentication auth
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -123,7 +125,7 @@ public class SmartRemindersController {
         if (req.timezone != null) reminder.setTimezone(req.timezone);
         if (req.targetAudience != null) reminder.setTargetAudience(req.targetAudience);
         if (req.message != null) reminder.setMessage(req.message);
-        if (req.channels != null) reminder.setChannels(String.join(",", req.channels));
+        reminder.setChannels("push");
 
         reminder = reminderRepository.save(reminder);
 
@@ -143,7 +145,7 @@ public class SmartRemindersController {
             Authentication auth
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -172,7 +174,7 @@ public class SmartRemindersController {
             Authentication auth
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -197,7 +199,7 @@ public class SmartRemindersController {
             Authentication auth
     ) {
         Profile admin = getAdminProfile(auth);
-        if (admin == null || !"super_admin".equalsIgnoreCase(admin.getRole())) {
+        if (!isAdmin(auth, admin)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -279,12 +281,16 @@ public class SmartRemindersController {
         response.put("type", r.getType());
         response.put("schedule", Map.of(
             "time", r.getScheduleTime(),
-            "days", Arrays.asList(r.getScheduleDays().split(",")),
+            "days", r.getScheduleDays() == null || r.getScheduleDays().isBlank()
+                ? List.of()
+                : Arrays.asList(r.getScheduleDays().split(",")),
             "timezone", r.getTimezone()
         ));
         response.put("targetAudience", r.getTargetAudience());
         response.put("message", r.getMessage());
-        response.put("channels", Arrays.asList(r.getChannels().split(",")));
+        response.put("channels", r.getChannels() == null || r.getChannels().isBlank()
+            ? List.of("push")
+            : Arrays.asList(r.getChannels().split(",")));
         response.put("isActive", r.isActive());
         response.put("lastTriggered", r.getLastTriggered() != null ? r.getLastTriggered().toString() : null);
         response.put("triggerCount", r.getTriggerCount());
@@ -293,8 +299,31 @@ public class SmartRemindersController {
     }
 
     private Profile getAdminProfile(Authentication auth) {
-        if (auth == null) return null;
-        return profileRepository.findByEmail(auth.getName()).orElse(null);
+        if (auth == null || auth.getPrincipal() == null) return null;
+        if (auth.getPrincipal() instanceof UUID uuid) {
+            return profileRepository.findById(uuid).orElse(null);
+        }
+        String principal = auth.getPrincipal().toString();
+        try {
+            UUID userId = UUID.fromString(principal);
+            return profileRepository.findById(userId).orElse(null);
+        } catch (IllegalArgumentException ex) {
+            return profileRepository.findByEmail(principal)
+                .or(() -> profileRepository.findByEmail(auth.getName()))
+                .orElse(null);
+        }
+    }
+
+    private boolean isAdmin(Authentication auth, Profile profile) {
+        if (auth != null && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))) {
+            return true;
+        }
+        if (auth != null && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"))) {
+            return true;
+        }
+        if (profile == null || profile.getRole() == null) return false;
+        String role = profile.getRole().toLowerCase(Locale.ROOT);
+        return role.equals("admin") || role.equals("super_admin") || role.equals("superadmin");
     }
 
     // ==================== REQUEST CLASSES ====================

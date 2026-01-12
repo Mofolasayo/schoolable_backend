@@ -4,6 +4,7 @@ import com.schoolable.backend.performance.AuraDashboardDto.EmployeeAuraResponse;
 import com.schoolable.backend.performance.AuraDashboardService;
 import com.schoolable.backend.performance.PeerHelpfulnessRating;
 import com.schoolable.backend.performance.PeerHelpfulnessRepository;
+import com.schoolable.backend.performance.WeeklyPerformanceReport;
 import com.schoolable.backend.performance.WeeklyReportRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
@@ -15,6 +16,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.temporal.WeekFields;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -451,6 +453,79 @@ public class TeamLeadController {
             
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Failed to fetch status: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Weekly report history for a team lead.
+     */
+    @Operation(summary = "Get weekly report history")
+    @GetMapping("/weekly-reports/history")
+    public ResponseEntity<?> getWeeklyReportHistory(
+            Authentication auth,
+            @RequestParam(required = false) Integer year) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        try {
+            UUID teamLeadId = (UUID) auth.getPrincipal();
+
+            var profileOpt = profileRepository.findById(teamLeadId);
+            if (profileOpt.isEmpty()) {
+                return ResponseEntity.status(404).body(Map.of("error", "Profile not found"));
+            }
+
+            Profile teamLead = profileOpt.get();
+            if (!Boolean.TRUE.equals(teamLead.getIsTeamLead()) && !"admin".equalsIgnoreCase(teamLead.getRole())) {
+                return ResponseEntity.status(403).body(Map.of("error", "Access denied. Team Lead role required."));
+            }
+
+            List<WeeklyPerformanceReport> reports = year != null
+                    ? weeklyReportRepository.findByReviewerIdAndYearOrderByWeekNumberDesc(teamLeadId, year)
+                    : weeklyReportRepository.findByReviewerIdOrderByYearDescWeekNumberDesc(teamLeadId);
+
+            Map<String, Map<String, Object>> grouped = new LinkedHashMap<>();
+            for (WeeklyPerformanceReport report : reports) {
+                String key = report.getYear() + "-" + report.getWeekNumber();
+                Map<String, Object> entry = grouped.computeIfAbsent(key, k -> {
+                    Map<String, Object> summary = new LinkedHashMap<>();
+                    summary.put("weekNumber", report.getWeekNumber());
+                    summary.put("year", report.getYear());
+                    summary.put("weekStartDate", report.getWeekStartDate());
+                    summary.put("weekEndDate", report.getWeekEndDate());
+                    summary.put("submittedCount", 0);
+                    summary.put("status", report.getStatus());
+                    summary.put("teamReportUrl", report.getTeamReportUrl());
+                    summary.put("lastSubmittedAt", report.getUpdatedAt());
+                    return summary;
+                });
+
+                int submittedCount = (int) entry.get("submittedCount");
+                entry.put("submittedCount", submittedCount + 1);
+
+                String teamReportUrl = (String) entry.get("teamReportUrl");
+                if ((teamReportUrl == null || teamReportUrl.isBlank())
+                        && report.getTeamReportUrl() != null
+                        && !report.getTeamReportUrl().isBlank()) {
+                    entry.put("teamReportUrl", report.getTeamReportUrl());
+                }
+
+                OffsetDateTime lastSubmittedAt = (OffsetDateTime) entry.get("lastSubmittedAt");
+                if (report.getUpdatedAt() != null && (lastSubmittedAt == null || report.getUpdatedAt().isAfter(lastSubmittedAt))) {
+                    entry.put("lastSubmittedAt", report.getUpdatedAt());
+                }
+            }
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("teamLeadId", teamLeadId);
+            response.put("year", year);
+            response.put("totalWeeks", grouped.size());
+            response.put("reports", new ArrayList<>(grouped.values()));
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to fetch report history: " + e.getMessage()));
         }
     }
 

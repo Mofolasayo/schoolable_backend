@@ -3,6 +3,8 @@ package com.schoolable.backend.kpi;
 import com.schoolable.backend.ai.AiJob;
 import com.schoolable.backend.ai.AiJobService;
 import com.schoolable.backend.ai.AiJobTypes;
+import com.schoolable.backend.hr.TeamLeadAppointment;
+import com.schoolable.backend.hr.TeamLeadRepository;
 import com.schoolable.backend.performance.WeeklyPerformanceReport;
 import com.schoolable.backend.performance.WeeklyReportRepository;
 import com.schoolable.backend.profile.Profile;
@@ -55,6 +57,9 @@ public class KpiAnalysisService {
 
     @Autowired
     private AiJobService aiJobService;
+
+    @Autowired
+    private TeamLeadRepository teamLeadRepository;
 
     // ==================== KPI MANAGEMENT ====================
 
@@ -318,8 +323,10 @@ public class KpiAnalysisService {
         }
 
         // Call AI service with enhanced context
+        String teamName = resolveTeamName(teamLead);
+
         GeminiAiService.AiAnalysisResult aiResult = geminiService.analyzeWeeklyProgressWithFeedback(
-            teamLead.getFullName() + "'s Team",
+            teamName,
             teamLead.getDepartment(),
             kpiData,
             memberFeedback,
@@ -471,8 +478,10 @@ public class KpiAnalysisService {
         }
 
         // Get AI analysis
+        String teamName = resolveTeamName(teamLead);
+
         GeminiAiService.AiAnalysisResult aiResult = geminiService.analyzeQuarterlyPerformance(
-            teamLead.getFullName() + "'s Team",
+            teamName,
             teamLead.getDepartment(),
             kpiData,
             quarter,
@@ -486,7 +495,7 @@ public class KpiAnalysisService {
             .orElse(new TeamQuarterlyScore(teamLeadId, quarter, year));
 
         score.setDepartment(teamLead.getDepartment());
-        score.setTeamName(teamLead.getFullName() + "'s Team");
+        score.setTeamName(teamName);
         score.setKpiAchievementScore(aiResult.kpiScore);
         score.setOverallTeamScore(aiResult.kpiScore); // Can add more factors later
         score.setAiSummary(aiResult.summary);
@@ -532,10 +541,51 @@ public class KpiAnalysisService {
      * Get team score for current user's team
      */
     public Optional<TeamQuarterlyScore> getTeamScore(UUID teamLeadId, String quarter, Integer year) {
-        return quarterlyScoreRepository.findByTeamLeadIdAndQuarterAndYear(teamLeadId, quarter, year);
+        Optional<TeamQuarterlyScore> score = quarterlyScoreRepository.findByTeamLeadIdAndQuarterAndYear(teamLeadId, quarter, year);
+        score.ifPresent(existing -> profileRepository.findById(teamLeadId).ifPresent(teamLead -> {
+            String teamName = resolveTeamName(teamLead);
+            if (teamName != null && !teamName.equals(existing.getTeamName())) {
+                existing.setTeamName(teamName);
+                quarterlyScoreRepository.save(existing);
+            }
+        }));
+        return score;
     }
 
     // ==================== HELPER METHODS ====================
+
+    private String resolveTeamName(Profile teamLead) {
+        Optional<TeamLeadAppointment> appointment = teamLeadRepository
+            .findByEmployeeIdAndStatus(teamLead.getId(), TeamLeadAppointment.STATUS_CONFIRMED);
+        if (appointment.isEmpty()) {
+            appointment = teamLeadRepository
+                .findByEmployeeIdAndStatus(teamLead.getId(), TeamLeadAppointment.STATUS_ACTING);
+        }
+        if (appointment.isEmpty()) {
+            appointment = teamLeadRepository.findByEmployeeIdOrderByAppointedAtDesc(teamLead.getId())
+                .stream()
+                .findFirst();
+        }
+
+        if (appointment.isPresent()) {
+            String teamName = appointment.get().getTeamName();
+            if (teamName != null && !teamName.isBlank()) {
+                return teamName.trim();
+            }
+        }
+
+        String department = teamLead.getDepartment();
+        if (department != null && !department.isBlank()) {
+            String trimmed = department.trim();
+            String lower = trimmed.toLowerCase(Locale.ROOT);
+            if (lower.endsWith("team")) {
+                return trimmed;
+            }
+            return trimmed + " Team";
+        }
+
+        return teamLead.getFullName() + "'s Team";
+    }
 
     private String getQuarterForWeek(int weekNumber) {
         if (weekNumber <= 13) return "Q1";

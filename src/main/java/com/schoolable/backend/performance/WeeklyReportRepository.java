@@ -21,6 +21,11 @@ public interface WeeklyReportRepository extends JpaRepository<WeeklyPerformanceR
     // Find reports submitted by a team lead for a specific week
     List<WeeklyPerformanceReport> findByReviewerIdAndWeekNumberAndYear(UUID reviewerId, Integer weekNumber, Integer year);
 
+    // Find reports submitted by a team lead (history)
+    List<WeeklyPerformanceReport> findByReviewerIdAndYearOrderByWeekNumberDesc(UUID reviewerId, Integer year);
+
+    List<WeeklyPerformanceReport> findByReviewerIdOrderByYearDescWeekNumberDesc(UUID reviewerId);
+
     // Find all reports for an employee (trend view)
     List<WeeklyPerformanceReport> findByEmployeeIdAndYearOrderByWeekNumberDesc(UUID employeeId, Integer year);
 

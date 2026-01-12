@@ -44,7 +44,7 @@ public class AdminRatingController {
     public ResponseEntity<?> getTeamLeadsForRating(Authentication auth) {
         Profile admin = getAdminProfile(auth);
         if (!isSuperAdmin(auth, admin)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only super admins can access this"));
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
         Map<UUID, Profile> teamLeadIndex = new LinkedHashMap<>();
@@ -99,6 +99,46 @@ public class AdminRatingController {
         ));
     }
 
+    // ==================== RECENT RATINGS ====================
+
+    @Operation(summary = "Get recent team lead ratings")
+    @GetMapping("/recent")
+    public ResponseEntity<?> getRecentRatings(Authentication auth) {
+        Profile admin = getAdminProfile(auth);
+        if (!isSuperAdmin(auth, admin)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Only admins can access this"));
+        }
+
+        List<AdminTeamLeadRating> ratings = ratingRepository.findTop10ByOrderByCreatedAtDesc();
+        Set<UUID> teamLeadIds = new HashSet<>();
+        for (AdminTeamLeadRating rating : ratings) {
+            if (rating.getTeamLeadId() != null) {
+                teamLeadIds.add(rating.getTeamLeadId());
+            }
+        }
+
+        Map<UUID, Profile> teamLeadMap = profileRepository.findAllById(teamLeadIds)
+            .stream()
+            .collect(HashMap::new, (map, profile) -> map.put(profile.getId(), profile), HashMap::putAll);
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (AdminTeamLeadRating rating : ratings) {
+            Profile lead = teamLeadMap.get(rating.getTeamLeadId());
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", rating.getId());
+            item.put("teamLeadId", rating.getTeamLeadId());
+            item.put("teamLeadName", lead != null ? lead.getFullName() : "Unknown");
+            item.put("department", lead != null ? lead.getDepartment() : null);
+            item.put("averageScore", rating.getAverageScore());
+            item.put("weekNumber", rating.getWeekNumber());
+            item.put("year", rating.getYear());
+            item.put("createdAt", rating.getCreatedAt());
+            result.add(item);
+        }
+
+        return ResponseEntity.ok(Map.of("ratings", result));
+    }
+
     // ==================== SUBMIT RATING ====================
 
     @Operation(summary = "Submit rating for a team lead")
@@ -110,7 +150,7 @@ public class AdminRatingController {
     ) {
         Profile admin = getAdminProfile(auth);
         if (!isSuperAdmin(auth, admin)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only super admins can submit ratings"));
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
         Profile teamLead = profileRepository.findById(teamLeadId).orElse(null);
@@ -172,7 +212,7 @@ public class AdminRatingController {
     ) {
         Profile admin = getAdminProfile(auth);
         if (!isSuperAdmin(auth, admin)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only super admins can access this"));
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
         Profile teamLead = profileRepository.findById(teamLeadId).orElse(null);
@@ -225,7 +265,7 @@ public class AdminRatingController {
     public ResponseEntity<?> getAuraAlerts(Authentication auth) {
         Profile admin = getAdminProfile(auth);
         if (!isSuperAdmin(auth, admin)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only super admins can access this"));
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
         // Get unacknowledged alerts
@@ -278,7 +318,7 @@ public class AdminRatingController {
     ) {
         Profile admin = getAdminProfile(auth);
         if (!isSuperAdmin(auth, admin)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only super admins can acknowledge alerts"));
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
         AuraTrendAlert alert = alertRepository.findById(alertId).orElse(null);
@@ -317,9 +357,12 @@ public class AdminRatingController {
         if (auth != null && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"))) {
             return true;
         }
+        if (auth != null && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))) {
+            return true;
+        }
         if (profile == null || profile.getRole() == null) return false;
         String role = profile.getRole().toLowerCase(Locale.ROOT);
-        return role.equals("super_admin") || role.equals("superadmin");
+        return role.equals("super_admin") || role.equals("superadmin") || role.equals("admin");
     }
 
     // ==================== REQUEST CLASS ====================
