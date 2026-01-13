@@ -241,6 +241,7 @@ public class AdminRatingController {
             rating.put("resultsDeliveryScore", r.getResultsDeliveryScore() != null ? r.getResultsDeliveryScore() : 0);
             rating.put("cultureChampionScore", r.getCultureChampionScore() != null ? r.getCultureChampionScore() : 0);
             rating.put("averageScore", r.getAverageScore());
+            rating.put("leadershipNotes", r.getLeadershipNotes());
             rating.put("areasOfStrength", r.getAreasOfStrength());
             rating.put("areasForImprovement", r.getAreasForImprovement());
             ratingData.add(rating);

@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -48,7 +49,21 @@ public class AttendancePolicyService {
             || !holidayCalendarRepository.findByHolidayDate(date).isEmpty();
         boolean isOnLeave = !timeOffRequestRepository.findApprovedForDate(userId, date).isEmpty();
 
-        boolean isWorkDay = schedule != null && schedule.getDaysOfWeekList().contains(date.getDayOfWeek().name());
+        List<String> scheduleDays = schedule != null ? schedule.getDaysOfWeekList() : List.of();
+        boolean isScheduledDay = schedule != null && matchesScheduleDay(date, scheduleDays);
+        boolean remoteAllowed = schedule != null && Boolean.TRUE.equals(schedule.getRemoteAllowed());
+        boolean isWorkDay;
+        if (!scheduleDays.isEmpty()) {
+            if (isScheduledDay) {
+                isWorkDay = true;
+            } else if (remoteAllowed) {
+                isWorkDay = !isDefaultNonWorkingDay(date.getDayOfWeek());
+            } else {
+                isWorkDay = false;
+            }
+        } else {
+            isWorkDay = !isDefaultNonWorkingDay(date.getDayOfWeek());
+        }
 
         return new AttendancePolicy(schedule, isWorkDay, isHoliday, isOnLeave, department);
     }
@@ -118,6 +133,31 @@ public class AttendancePolicyService {
 
     private WorkSchedule getDefaultSchedule() {
         return workScheduleRepository.findByIsActiveTrue().stream().findFirst().orElse(null);
+    }
+
+    private boolean matchesScheduleDay(LocalDate date, List<String> daysOfWeek) {
+        if (daysOfWeek == null || daysOfWeek.isEmpty()) {
+            return false;
+        }
+        DayOfWeek target = date.getDayOfWeek();
+        String targetName = target.name().toLowerCase(Locale.ROOT);
+        String targetShort = targetName.substring(0, 3);
+        String targetIndex = Integer.toString(target.getValue());
+
+        for (String entry : daysOfWeek) {
+            if (entry == null) continue;
+            String normalized = entry.trim().toLowerCase(Locale.ROOT);
+            if (normalized.isEmpty()) continue;
+            if (normalized.equals(targetIndex)) return true;
+            if (normalized.equals(targetName)) return true;
+            if (normalized.startsWith(targetShort)) return true;
+        }
+
+        return false;
+    }
+
+    private boolean isDefaultNonWorkingDay(DayOfWeek day) {
+        return day == DayOfWeek.FRIDAY || day == DayOfWeek.SATURDAY;
     }
 
     private double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
