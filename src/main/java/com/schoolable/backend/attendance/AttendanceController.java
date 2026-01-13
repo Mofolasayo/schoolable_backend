@@ -29,6 +29,7 @@ public class AttendanceController {
     private final BiometricConsentRepository biometricConsentRepository;
     private final FaceMatchService faceMatchService;
     private final HolidayCalendarRepository holidayCalendarRepository;
+    private final TimeOffRequestRepository timeOffRequestRepository;
 
     public AttendanceController(
             AttendanceRepository attendanceRepository,
@@ -37,7 +38,8 @@ public class AttendanceController {
             AttendancePolicyService attendancePolicyService,
             BiometricConsentRepository biometricConsentRepository,
             FaceMatchService faceMatchService,
-            HolidayCalendarRepository holidayCalendarRepository) {
+            HolidayCalendarRepository holidayCalendarRepository,
+            TimeOffRequestRepository timeOffRequestRepository) {
         this.attendanceRepository = attendanceRepository;
         this.officeLocationRepository = officeLocationRepository;
         this.profileRepository = profileRepository;
@@ -45,6 +47,7 @@ public class AttendanceController {
         this.biometricConsentRepository = biometricConsentRepository;
         this.faceMatchService = faceMatchService;
         this.holidayCalendarRepository = holidayCalendarRepository;
+        this.timeOffRequestRepository = timeOffRequestRepository;
     }
 
     // ==================== CHECK-IN ====================
@@ -661,54 +664,145 @@ public class AttendanceController {
             return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
         }
 
-        if (req == null || req.holidayDate() == null || req.holidayDate().isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Holiday date is required"));
+        if (req == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Holiday request is required"));
         }
         if (req.name() == null || req.name().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Holiday name is required"));
         }
 
-        LocalDate holidayDate;
+        String startDateRaw = req.startDate() != null ? req.startDate() : req.holidayDate();
+        String endDateRaw = req.endDate() != null ? req.endDate() : req.holidayDate();
+
+        if (startDateRaw == null || startDateRaw.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Holiday start date is required"));
+        }
+
+        LocalDate startDate;
+        LocalDate endDate;
         try {
-            holidayDate = LocalDate.parse(req.holidayDate());
+            startDate = LocalDate.parse(startDateRaw);
+            endDate = (endDateRaw == null || endDateRaw.isBlank())
+                    ? startDate
+                    : LocalDate.parse(endDateRaw);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid holiday date"));
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid holiday date range"));
+        }
+
+        if (endDate.isBefore(startDate)) {
+            LocalDate swap = startDate;
+            startDate = endDate;
+            endDate = swap;
         }
 
         String department = req.department() != null && !req.department().isBlank()
                 ? req.department().trim()
                 : null;
 
-        boolean duplicate;
-        if (department != null) {
-            duplicate = !holidayCalendarRepository.findByHolidayDateAndDepartment(holidayDate, department).isEmpty();
-        } else {
-            duplicate = !holidayCalendarRepository.findByHolidayDate(holidayDate).isEmpty();
-        }
-        if (duplicate) {
-            return ResponseEntity.status(409).body(Map.of("error", "Holiday already exists for that date"));
+        List<Map<String, Object>> created = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
+
+        for (LocalDate cursor = startDate; !cursor.isAfter(endDate); cursor = cursor.plusDays(1)) {
+            boolean exists;
+            if (department != null) {
+                exists = !holidayCalendarRepository.findByHolidayDateAndDepartment(cursor, department).isEmpty();
+            } else {
+                exists = !holidayCalendarRepository.findByHolidayDate(cursor).isEmpty();
+            }
+            if (exists) {
+                skipped.add(cursor.toString());
+                continue;
+            }
+
+            HolidayCalendar holiday = new HolidayCalendar();
+            holiday.setHolidayDate(cursor);
+            holiday.setName(req.name().trim());
+            holiday.setDepartment(department);
+            if (req.region() != null && !req.region().isBlank()) {
+                holiday.setRegion(req.region().trim());
+            }
+            if (req.isPaid() != null) {
+                holiday.setIsPaid(req.isPaid());
+            }
+
+            HolidayCalendar saved = holidayCalendarRepository.save(holiday);
+            created.add(Map.of(
+                    "id", saved.getId(),
+                    "holiday_date", saved.getHolidayDate() != null ? saved.getHolidayDate().toString() : null,
+                    "name", saved.getName(),
+                    "department", saved.getDepartment(),
+                    "region", saved.getRegion(),
+                    "is_paid", saved.getIsPaid()
+            ));
         }
 
-        HolidayCalendar holiday = new HolidayCalendar();
-        holiday.setHolidayDate(holidayDate);
-        holiday.setName(req.name().trim());
-        holiday.setDepartment(department);
-        if (req.region() != null && !req.region().isBlank()) {
-            holiday.setRegion(req.region().trim());
-        }
-        if (req.isPaid() != null) {
-            holiday.setIsPaid(req.isPaid());
+        if (created.isEmpty() && !skipped.isEmpty()) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Holidays already exist for the selected range",
+                    "skipped", skipped
+            ));
         }
 
-        HolidayCalendar saved = holidayCalendarRepository.save(holiday);
         return ResponseEntity.ok(Map.of(
-                "id", saved.getId(),
-                "holiday_date", saved.getHolidayDate() != null ? saved.getHolidayDate().toString() : null,
-                "name", saved.getName(),
-                "department", saved.getDepartment(),
-                "region", saved.getRegion(),
-                "is_paid", saved.getIsPaid()
+                "created", created,
+                "skipped", skipped,
+                "totalCreated", created.size()
         ));
+    }
+
+    @Operation(summary = "List approved time off requests")
+    @GetMapping("/time-off")
+    public ResponseEntity<?> getApprovedTimeOff(
+            @RequestParam String startDate,
+            @RequestParam String endDate,
+            @RequestParam(required = false) String department,
+            Authentication auth) {
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        LocalDate start;
+        LocalDate end;
+        try {
+            start = LocalDate.parse(startDate);
+            end = LocalDate.parse(endDate);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid date range"));
+        }
+
+        if (end.isBefore(start)) {
+            LocalDate swap = start;
+            start = end;
+            end = swap;
+        }
+
+        List<TimeOffRequest> requests = timeOffRequestRepository.findApprovedOverlappingRange(start, end);
+        Map<UUID, Profile> profiles = new HashMap<>();
+        List<Map<String, Object>> response = new ArrayList<>();
+
+        for (TimeOffRequest request : requests) {
+            Profile profile = profiles.computeIfAbsent(request.getEmployeeId(), id ->
+                    profileRepository.findById(id).orElse(null));
+
+            if (department != null && profile != null && profile.getDepartment() != null
+                    && !department.equalsIgnoreCase(profile.getDepartment())) {
+                continue;
+            }
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", request.getId());
+            item.put("employeeId", request.getEmployeeId());
+            item.put("employeeName", profile != null ? profile.getFullName() : null);
+            item.put("department", profile != null ? profile.getDepartment() : null);
+            item.put("type", request.getType());
+            item.put("startDate", request.getStartDate() != null ? request.getStartDate().toString() : null);
+            item.put("endDate", request.getEndDate() != null ? request.getEndDate().toString() : null);
+            item.put("notes", request.getNotes());
+            item.put("approvedAt", request.getApprovedAt() != null ? request.getApprovedAt().toString() : null);
+            response.add(item);
+        }
+
+        return ResponseEntity.ok(response);
     }
 
     // ==================== HELPER METHODS ====================
@@ -830,6 +924,10 @@ public class AttendanceController {
     public record HolidayRequest(
             @JsonAlias({"holiday_date", "date"})
             String holidayDate,
+            @JsonAlias({"start_date", "startDate"})
+            String startDate,
+            @JsonAlias({"end_date", "endDate"})
+            String endDate,
             String name,
             String department,
             String region,

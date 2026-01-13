@@ -11,4 +11,7 @@ import java.util.UUID;
 public interface TimeOffRequestRepository extends JpaRepository<TimeOffRequest, UUID> {
     @Query("SELECT t FROM TimeOffRequest t WHERE t.employeeId = :employeeId AND t.status = 'APPROVED' AND t.startDate <= :date AND t.endDate >= :date")
     List<TimeOffRequest> findApprovedForDate(@Param("employeeId") UUID employeeId, @Param("date") LocalDate date);
+
+    @Query("SELECT t FROM TimeOffRequest t WHERE t.status = 'APPROVED' AND t.startDate <= :endDate AND t.endDate >= :startDate")
+    List<TimeOffRequest> findApprovedOverlappingRange(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 }
