@@ -18,6 +18,7 @@ RUN chmod +x gradlew && ./gradlew bootJar --no-daemon
 
 # ---- Run stage ----
 FROM eclipse-temurin:17-jre
+LABEL service="schoolable-backend"
 WORKDIR /app
 
 # Copy the jar from the build stage
