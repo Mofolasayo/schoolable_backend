@@ -1,7 +1,10 @@
 package com.schoolable.backend.task;
 
 import org.springframework.data.jpa.domain.Specification;
+import jakarta.persistence.criteria.Predicate;
 
+import java.util.Collection;
+import java.util.ArrayList;
 import java.util.UUID;
 
 public final class TaskSpecifications {
@@ -10,6 +13,24 @@ public final class TaskSpecifications {
 
     public static Specification<Task> hasAssignee(UUID assigneeId) {
         return (root, query, cb) -> assigneeId == null ? cb.conjunction() : cb.equal(root.get("assigneeId"), assigneeId);
+    }
+
+    public static Specification<Task> hasAssigneeOrTaskIds(UUID assigneeId, Collection<Long> taskIds) {
+        return (root, query, cb) -> {
+            boolean hasAssignee = assigneeId != null;
+            boolean hasTaskIds = taskIds != null && !taskIds.isEmpty();
+            if (!hasAssignee && !hasTaskIds) {
+                return cb.conjunction();
+            }
+            var predicates = new ArrayList<Predicate>();
+            if (hasAssignee) {
+                predicates.add(cb.equal(root.get("assigneeId"), assigneeId));
+            }
+            if (hasTaskIds) {
+                predicates.add(root.get("id").in(taskIds));
+            }
+            return cb.or(predicates.toArray(new Predicate[0]));
+        };
     }
 
     public static Specification<Task> hasDepartment(String department) {

@@ -30,6 +30,7 @@ public class TaskController {
     private final TaskSubtaskRepository subtaskRepository;
     private final TaskCommentRepository commentRepository;
     private final TaskAttachmentRepository attachmentRepository;
+    private final TaskAssigneeRepository taskAssigneeRepository;
     private final ProfileRepository profileRepository;
     private final WebSocketMessageController webSocketController;
 
@@ -38,12 +39,14 @@ public class TaskController {
             TaskSubtaskRepository subtaskRepository,
             TaskCommentRepository commentRepository,
             TaskAttachmentRepository attachmentRepository,
+            TaskAssigneeRepository taskAssigneeRepository,
             ProfileRepository profileRepository,
             WebSocketMessageController webSocketController) {
         this.taskRepository = taskRepository;
         this.subtaskRepository = subtaskRepository;
         this.commentRepository = commentRepository;
         this.attachmentRepository = attachmentRepository;
+        this.taskAssigneeRepository = taskAssigneeRepository;
         this.profileRepository = profileRepository;
         this.webSocketController = webSocketController;
     }
@@ -109,7 +112,14 @@ public class TaskController {
         UUID userId = (UUID) auth.getPrincipal();
         String normalizedStatus = normalizeStatus(status);
 
-        var spec = TaskSpecifications.hasAssignee(userId)
+        List<Long> assignedTaskIds = taskAssigneeRepository
+            .findByUserIdAndIsActiveTrue(userId)
+            .stream()
+            .map(TaskAssignee::getTaskId)
+            .distinct()
+            .toList();
+
+        var spec = TaskSpecifications.hasAssigneeOrTaskIds(userId, assignedTaskIds)
             .and(TaskSpecifications.hasStatus(normalizedStatus))
             .and(TaskSpecifications.hasPriority(priority))
             .and(TaskSpecifications.titleContains(query));
@@ -248,6 +258,20 @@ public class TaskController {
         }
 
         task = taskRepository.save(task);
+
+        if (task.getAssigneeId() != null) {
+            boolean alreadyAssigned = taskAssigneeRepository
+                .existsByTaskIdAndUserIdAndIsActiveTrue(task.getId(), task.getAssigneeId());
+            if (!alreadyAssigned) {
+                TaskAssignee assignment = new TaskAssignee(
+                    task.getId(),
+                    task.getAssigneeId(),
+                    "primary",
+                    userId
+                );
+                taskAssigneeRepository.save(assignment);
+            }
+        }
 
         // Create subtasks
         if (req.subtasks() != null && !req.subtasks().isEmpty()) {
@@ -868,6 +892,9 @@ public class TaskController {
     private boolean canViewTask(UUID userId, Authentication auth, Task task) {
         if (isAdmin(auth)) return true;
         if (userId.equals(task.getAssigneeId()) || userId.equals(task.getCreatedBy())) {
+            return true;
+        }
+        if (taskAssigneeRepository.existsByTaskIdAndUserIdAndIsActiveTrue(task.getId(), userId)) {
             return true;
         }
         Profile profile = profileRepository.findById(userId).orElse(null);
