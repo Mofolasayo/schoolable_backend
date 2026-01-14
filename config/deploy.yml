@@ -1,5 +1,5 @@
 service: schoolable-backend
-image: ghcr.io/mofolasayo/schoolable_backend
+image: mofolasayo/schoolable_backend
 
 servers:
   web:
