@@ -103,6 +103,13 @@ public class AttendanceController {
         } else {
             status = "present";
         }
+        boolean requiresBiometric = policy.isWorkDay() && !policy.isHoliday() && !policy.isOnLeave();
+        if (requiresBiometric && (req.photoUrl() == null || req.photoUrl().isBlank())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "photo_url is required for check-in",
+                "code", "PHOTO_REQUIRED"
+            ));
+        }
 
         // Create attendance record
         Attendance attendance = new Attendance();
@@ -137,6 +144,12 @@ public class AttendanceController {
         if (Boolean.FALSE.equals(attendance.getLivenessPassed())) {
             attendance.setVerificationStatus("failed");
         }
+        if (requiresBiometric && Boolean.FALSE.equals(attendance.getLivenessPassed())) {
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Liveness check failed",
+                "code", "LIVENESS_FAILED"
+            ));
+        }
         
         // Device and network info
         attendance.setDeviceInfo(req.deviceInfo());
@@ -146,13 +159,30 @@ public class AttendanceController {
         attendance.setCreatedAt(OffsetDateTime.now());
         attendance.setRetentionUntil(OffsetDateTime.now().plusDays(consent.getRetentionDays()));
 
-        if (req.photoUrl() != null && policy.isWorkDay() && !policy.isHoliday() && !policy.isOnLeave() && !Boolean.FALSE.equals(attendance.getLivenessPassed())) {
+        if (requiresBiometric && req.photoUrl() != null && !Boolean.FALSE.equals(attendance.getLivenessPassed())) {
             Profile profile = profileRepository.findById(userId).orElse(null);
-            if (profile != null && profile.getReferenceFaceUrl() != null) {
-                FaceMatchResult matchResult = faceMatchService.compare(profile.getReferenceFaceUrl(), req.photoUrl());
-                attendance.setFaceMatchScore(matchResult.confidence());
-                attendance.setVerificationStatus(matchResult.match() ? "verified" : "failed");
-                attendance.setFaceMatchProvider(matchResult.provider());
+            if (profile != null) {
+                if (profile.getReferenceFaceUrl() == null || profile.getReferenceFaceUrl().isBlank()) {
+                    profile.setReferenceFaceUrl(req.photoUrl());
+                    profile.setReferenceFaceRegisteredAt(OffsetDateTime.now());
+                    profileRepository.save(profile);
+                    attendance.setVerificationStatus("verified");
+                    attendance.setFaceMatchScore(100.0);
+                    attendance.setFaceMatchProvider("reference");
+                } else {
+                    FaceMatchResult matchResult = faceMatchService.compare(profile.getReferenceFaceUrl(), req.photoUrl());
+                    attendance.setFaceMatchScore(matchResult.confidence());
+                    attendance.setFaceMatchProvider(matchResult.provider());
+                    if (!matchResult.match()) {
+                        return ResponseEntity.status(403).body(Map.of(
+                            "error", "Face verification failed",
+                            "code", "FACE_MISMATCH",
+                            "confidence", matchResult.confidence(),
+                            "provider", matchResult.provider()
+                        ));
+                    }
+                    attendance.setVerificationStatus("verified");
+                }
             }
         }
 
@@ -486,6 +516,12 @@ public class AttendanceController {
         }
 
         Profile profile = profileOpt.get();
+        if (profile.getReferenceFaceUrl() != null && !profile.getReferenceFaceUrl().isBlank()) {
+            return ResponseEntity.status(409).body(Map.of(
+                "error", "Reference face already registered. Contact admin to reset.",
+                "code", "REFERENCE_FACE_ALREADY_SET"
+            ));
+        }
         profile.setReferenceFaceUrl(faceUrl);
         profile.setReferenceFaceRegisteredAt(OffsetDateTime.now());
         profileRepository.save(profile);

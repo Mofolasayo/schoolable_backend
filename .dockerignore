@@ -1,0 +1,10 @@
+.git
+.kamal
+.gradle
+build
+!build/libs/*.jar
+bin
+.idea
+.vscode
+*.iml
+.DS_Store

@@ -1,0 +1,46 @@
+service: schoolable-backend
+image: ghcr.io/mofolasayo/schoolable_backend
+
+servers:
+  web:
+    - 165.227.1.93
+
+ssh:
+  user: deploy
+  keys:
+    - ~/.ssh/id_rsa
+
+registry:
+  server: ghcr.io
+  username: <%= ENV.fetch("KAMAL_REGISTRY_USERNAME") %>
+  password: <%= ENV.fetch("KAMAL_REGISTRY_PASSWORD") %>
+
+builder:
+  arch: amd64
+  driver: docker
+  context: .
+
+env:
+  clear:
+    PORT: "8081"
+    SPRING_DATASOURCE_URL: "jdbc:postgresql://10.46.0.5:5432/schoolable"
+    SPRING_DATASOURCE_USERNAME: "schoolable"
+    RESEND_FROM: "hello@getdebby.co"
+  secret:
+    - SPRING_DATASOURCE_PASSWORD
+    - JWT_SECRET
+    - RESEND_API_KEY
+    - CLOUDINARY_CLOUD_NAME
+    - CLOUDINARY_API_KEY
+    - CLOUDINARY_API_SECRET
+    - GEMINI_API_KEY
+
+readiness_delay: 15
+deploy_timeout: 120
+
+proxy:
+  app_port: 8081
+  hosts:
+    - 165.227.1.93
+  healthcheck:
+    path: /up

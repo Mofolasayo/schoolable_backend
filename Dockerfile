@@ -24,4 +24,4 @@ WORKDIR /app
 COPY --from=build /workspace/build/libs/schoolable_backend-0.0.1-SNAPSHOT.jar app.jar
 
 # Bind Spring to the port provided by the platform (e.g., Render sets PORT)
-CMD ["sh", "-c", "java -jar /app/app.jar --server.port=${PORT}"]
+CMD ["sh", "-c", "java -jar /app/app.jar --server.port=${PORT:-8081}"]

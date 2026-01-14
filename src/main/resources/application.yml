@@ -2,9 +2,9 @@ spring:
   application:
     name: schoolable-backend
   datasource:
-    url: jdbc:postgresql://localhost:5432/schoolable
-    username: postgres
-    password: folasayo
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/schoolable}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:folasayo}
   jpa:
     hibernate:
       ddl-auto: none
@@ -25,7 +25,7 @@ spring:
       max-request-size: 15MB
 
 server:
-  port: 8081
+  port: ${PORT:8081}
 
 logging:
   level:
@@ -37,7 +37,7 @@ schoolable:
       enabled: false
 
 jwt:
-  secret: "super-secret-change-me-please-32bytes-minimum-1234567890"
+  secret: ${JWT_SECRET:super-secret-change-me-please-32bytes-minimum-1234567890}
   expirationSeconds: 86400
 
 resend:
@@ -55,4 +55,4 @@ cloudinary:
 # Gemini AI configuration for KPI insights
 gemini:
   api:
-    key: ${GEMINI_API_KEY:AIzaSyBu8oPRazR8zn1A0DLmgBjVIl6KaSN5UZE}
+    key: ${GEMINI_API_KEY:}

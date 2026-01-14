@@ -83,7 +83,9 @@ public class TaskController {
             spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
         );
 
-        List<Map<String, Object>> result = pageData.getContent().stream()
+        List<Task> tasks = pageData.getContent();
+
+        List<Map<String, Object>> result = tasks.stream()
             .map(this::buildTaskResponse)
             .toList();
 
