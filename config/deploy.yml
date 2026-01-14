@@ -8,7 +8,7 @@ servers:
 ssh:
   user: deploy
   keys:
-    - ~/.ssh/id_rsa
+    - <%= ENV.fetch("KAMAL_SSH_KEY", "~/.ssh/id_rsa") %>
 
 registry:
   server: ghcr.io
