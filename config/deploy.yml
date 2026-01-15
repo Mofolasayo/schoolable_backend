@@ -26,10 +26,10 @@ env:
     SPRING_DATASOURCE_URL: "jdbc:postgresql://10.46.0.5:5432/schoolable"
     SPRING_DATASOURCE_USERNAME: "schoolable"
     RESEND_FROM: "hello@getdebby.co"
-    APP_CORS_ALLOWED_ORIGINS: "https://165-227-1-93.sslip.io"
+    APP_CORS_ALLOWED_ORIGINS: "https://165-227-1-93.sslip.io,http://localhost:3000,http://localhost:3001"
     SENTRY_ENVIRONMENT: "production"
     SENTRY_TRACES_SAMPLE_RATE: "0.1"
-    SENTRY_TEST_ENABLED: "false"
+    SENTRY_TEST_ENABLED: <%= ENV.fetch("SENTRY_TEST_ENABLED", "false") %>
   secret:
     - SPRING_DATASOURCE_PASSWORD
     - JWT_SECRET

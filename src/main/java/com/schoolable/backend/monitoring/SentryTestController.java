@@ -13,10 +13,10 @@ import java.util.Map;
 @RestController
 public class SentryTestController {
 
-    @Value("${sentry.test-token:}")
+    @Value("${SENTRY_TEST_TOKEN:${sentry.test-token:}}")
     private String testToken;
 
-    @Value("${sentry.test-enabled:false}")
+    @Value("${SENTRY_TEST_ENABLED:${sentry.test-enabled:false}}")
     private boolean testEnabled;
 
     @GetMapping("/internal/sentry-test")
