@@ -16,10 +16,17 @@ public class SentryTestController {
     @Value("${sentry.test-token:}")
     private String testToken;
 
+    @Value("${sentry.test-enabled:false}")
+    private boolean testEnabled;
+
     @GetMapping("/internal/sentry-test")
     public ResponseEntity<?> trigger(
             @RequestHeader(value = "X-Sentry-Test-Token", required = false) String token
     ) {
+        if (!testEnabled) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+
         if (testToken == null || testToken.isBlank() || token == null || !testToken.equals(token)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
