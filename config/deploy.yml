@@ -27,6 +27,8 @@ env:
     SPRING_DATASOURCE_USERNAME: "schoolable"
     RESEND_FROM: "hello@getdebby.co"
     APP_CORS_ALLOWED_ORIGINS: "https://165-227-1-93.sslip.io"
+    SENTRY_ENVIRONMENT: "production"
+    SENTRY_TRACES_SAMPLE_RATE: "0.1"
   secret:
     - SPRING_DATASOURCE_PASSWORD
     - JWT_SECRET
@@ -35,6 +37,8 @@ env:
     - CLOUDINARY_API_KEY
     - CLOUDINARY_API_SECRET
     - GEMINI_API_KEY
+    - SENTRY_DSN
+    - SENTRY_TEST_TOKEN
 
 readiness_delay: 15
 deploy_timeout: 120

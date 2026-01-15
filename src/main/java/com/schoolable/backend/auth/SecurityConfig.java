@@ -76,6 +76,7 @@ public class SecurityConfig {
                                 "/ws-native/**"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/up", "/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/internal/sentry-test").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/verify-link", "/auth/debug").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/verify-link").permitAll()
                         .requestMatchers(HttpMethod.GET, "/storage/status").permitAll()

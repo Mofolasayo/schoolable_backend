@@ -13,8 +13,10 @@ COPY build.gradle build.gradle
 COPY settings.gradle settings.gradle
 COPY src src
 
-# Build the Spring Boot fat jar
-RUN chmod +x gradlew && ./gradlew bootJar --no-daemon
+# Build the Spring Boot fat jar (Sentry auth token is optional)
+RUN --mount=type=secret,id=SENTRY_AUTH_TOKEN \
+    SENTRY_AUTH_TOKEN="$(cat /run/secrets/SENTRY_AUTH_TOKEN 2>/dev/null || true)" \
+    && chmod +x gradlew && ./gradlew bootJar --no-daemon
 
 # ---- Run stage ----
 FROM eclipse-temurin:17-jre
