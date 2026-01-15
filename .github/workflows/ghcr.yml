@@ -37,3 +37,19 @@ jobs:
           tags: |
             ghcr.io/mofolasayo/schoolable_backend:latest
             ghcr.io/mofolasayo/schoolable_backend:${{ github.sha }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy on droplet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script: |
+            cd ~/schoolable_backend
+            set -a && . .kamal/secrets && set +a
+            kamal deploy --skip-push --version latest
