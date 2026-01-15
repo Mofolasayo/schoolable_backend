@@ -47,10 +47,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*") // In production, restrict this
                 .withSockJS(); // Fallback for browsers that don't support WebSocket
-        
-        // Also add endpoint without SockJS for native mobile apps
-        registry.addEndpoint("/ws-native")
-                .setAllowedOriginPatterns("*");
     }
 
     @Override
