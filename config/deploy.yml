@@ -41,6 +41,7 @@ deploy_timeout: 120
 
 proxy:
   app_port: 8081
+  ssl: true
   hosts:
     - 165-227-1-93.sslip.io
   healthcheck:
