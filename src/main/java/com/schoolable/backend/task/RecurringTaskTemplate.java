@@ -4,6 +4,9 @@ import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -44,6 +47,9 @@ public class RecurringTaskTemplate {
 
     @Column(name = "recurrence_day")
     private Integer recurrenceDay; // Day of week (1-7) or day of month (1-31)
+
+    @Column(name = "recurrence_days", columnDefinition = "INTEGER[]")
+    private Integer[] recurrenceDays; // Days of week (1-7) for weekly schedules
 
     @Column(name = "due_time")
     private LocalTime dueTime; // Default due time for created tasks
@@ -90,20 +96,87 @@ public class RecurringTaskTemplate {
 
     // Calculate next occurrence based on pattern
     public void advanceNextOccurrence() {
-        switch (recurrencePattern.toLowerCase()) {
+        LocalDate baseDate = nextOccurrence != null ? nextOccurrence : LocalDate.now();
+        nextOccurrence = computeNextOccurrence(baseDate, false);
+    }
+
+    public LocalDate computeNextOccurrence(LocalDate baseDate, boolean includeBaseDate) {
+        LocalDate startDate = baseDate != null ? baseDate : LocalDate.now();
+        String pattern = recurrencePattern != null ? recurrencePattern.toLowerCase() : "daily";
+
+        switch (pattern) {
             case "daily":
-                nextOccurrence = nextOccurrence.plusDays(1);
-                break;
-            case "weekly":
-                nextOccurrence = nextOccurrence.plusWeeks(1);
-                break;
-            case "biweekly":
-                nextOccurrence = nextOccurrence.plusWeeks(2);
-                break;
-            case "monthly":
-                nextOccurrence = nextOccurrence.plusMonths(1);
-                break;
+                return includeBaseDate ? startDate : startDate.plusDays(1);
+            case "weekly": {
+                Set<Integer> days = normalizeRecurrenceDays();
+                if (!days.isEmpty()) {
+                    return nextDateFromDays(startDate, includeBaseDate, days);
+                }
+                int targetDay = recurrenceDay != null ? recurrenceDay : startDate.getDayOfWeek().getValue();
+                return nextDateForDayOfWeek(startDate, includeBaseDate, targetDay);
+            }
+            case "biweekly": {
+                int targetDay = recurrenceDay != null ? recurrenceDay : startDate.getDayOfWeek().getValue();
+                if (includeBaseDate) {
+                    return nextDateForDayOfWeek(startDate, true, targetDay);
+                }
+                LocalDate nextWeekly = nextDateForDayOfWeek(startDate, false, targetDay);
+                return nextWeekly.plusWeeks(1);
+            }
+            case "monthly": {
+                int targetDay = recurrenceDay != null ? recurrenceDay : startDate.getDayOfMonth();
+                return nextDateForMonthly(startDate, includeBaseDate, targetDay);
+            }
+            default:
+                return includeBaseDate ? startDate : startDate.plusDays(1);
         }
+    }
+
+    private Set<Integer> normalizeRecurrenceDays() {
+        if (recurrenceDays == null || recurrenceDays.length == 0) {
+            return Set.of();
+        }
+        Set<Integer> normalized = new HashSet<>();
+        Arrays.stream(recurrenceDays)
+            .filter(day -> day != null && day >= 1 && day <= 7)
+            .forEach(normalized::add);
+        return normalized;
+    }
+
+    private LocalDate nextDateFromDays(LocalDate baseDate, boolean includeBaseDate, Set<Integer> days) {
+        LocalDate start = includeBaseDate ? baseDate : baseDate.plusDays(1);
+        for (int offset = 0; offset < 7; offset++) {
+            LocalDate candidate = start.plusDays(offset);
+            if (days.contains(candidate.getDayOfWeek().getValue())) {
+                return candidate;
+            }
+        }
+        return start;
+    }
+
+    private LocalDate nextDateForDayOfWeek(LocalDate baseDate, boolean includeBaseDate, int targetDay) {
+        int baseDay = baseDate.getDayOfWeek().getValue();
+        int delta = targetDay - baseDay;
+        if (delta < 0 || (!includeBaseDate && delta == 0)) {
+            delta += 7;
+        }
+        return baseDate.plusDays(delta);
+    }
+
+    private LocalDate nextDateForMonthly(LocalDate baseDate, boolean includeBaseDate, int targetDay) {
+        LocalDate currentMonth = resolveMonthlyDate(baseDate.getYear(), baseDate.getMonthValue(), targetDay);
+        if ((includeBaseDate && !currentMonth.isBefore(baseDate)) || (!includeBaseDate && currentMonth.isAfter(baseDate))) {
+            return currentMonth;
+        }
+        LocalDate nextMonth = baseDate.plusMonths(1);
+        return resolveMonthlyDate(nextMonth.getYear(), nextMonth.getMonthValue(), targetDay);
+    }
+
+    private LocalDate resolveMonthlyDate(int year, int month, int targetDay) {
+        LocalDate firstOfMonth = LocalDate.of(year, month, 1);
+        int maxDay = firstOfMonth.lengthOfMonth();
+        int day = Math.min(Math.max(targetDay, 1), maxDay);
+        return LocalDate.of(year, month, day);
     }
 
     // Getters and Setters
@@ -133,6 +206,9 @@ public class RecurringTaskTemplate {
 
     public Integer getRecurrenceDay() { return recurrenceDay; }
     public void setRecurrenceDay(Integer recurrenceDay) { this.recurrenceDay = recurrenceDay; }
+
+    public Integer[] getRecurrenceDays() { return recurrenceDays; }
+    public void setRecurrenceDays(Integer[] recurrenceDays) { this.recurrenceDays = recurrenceDays; }
 
     public LocalTime getDueTime() { return dueTime; }
     public void setDueTime(LocalTime dueTime) { this.dueTime = dueTime; }

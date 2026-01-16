@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -26,6 +27,18 @@ public class RecurringTaskService {
         List<RecurringTaskTemplate> templates = templateRepository.findByIsActiveTrueAndNextOccurrenceLessThanEqual(today);
 
         for (RecurringTaskTemplate template : templates) {
+            if (template.getNextOccurrence() == null) {
+                template.setNextOccurrence(template.computeNextOccurrence(today, true));
+                templateRepository.save(template);
+                continue;
+            }
+
+            if (wasCreatedToday(template, today)) {
+                template.setNextOccurrence(template.computeNextOccurrence(today, false));
+                templateRepository.save(template);
+                continue;
+            }
+
             Task task = new Task();
             task.setTitle(template.getTitle());
             task.setDescription(template.getDescription());
@@ -46,9 +59,14 @@ public class RecurringTaskService {
 
             taskRepository.save(task);
 
-            template.setLastCreatedAt(java.time.LocalDateTime.now());
-            template.advanceNextOccurrence();
+            template.setLastCreatedAt(LocalDateTime.now());
+            template.setNextOccurrence(template.computeNextOccurrence(today, false));
             templateRepository.save(template);
         }
+    }
+
+    private boolean wasCreatedToday(RecurringTaskTemplate template, LocalDate today) {
+        LocalDateTime lastCreatedAt = template.getLastCreatedAt();
+        return lastCreatedAt != null && lastCreatedAt.toLocalDate().isEqual(today);
     }
 }

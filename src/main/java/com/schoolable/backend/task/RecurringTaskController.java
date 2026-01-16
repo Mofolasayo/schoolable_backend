@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -57,20 +58,58 @@ public class RecurringTaskController {
             return ResponseEntity.status(403).body(Map.of("error", "Team lead or admin access required"));
         }
 
-        String department = request.organization() != null ? request.organization() : (profile != null ? profile.getDepartment() : null);
+        String title = normalizeString(request.title());
+        if (title == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Title is required"));
+        }
+
+        String recurrencePattern = normalizeString(request.recurrencePattern());
+        if (recurrencePattern == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Recurrence pattern is required"));
+        }
+
+        String department = normalizeString(request.organization());
+        if (department == null && profile != null) {
+            department = profile.getDepartment();
+        }
+
+        UUID assigneeId;
+        try {
+            assigneeId = parseUuid(request.defaultAssigneeId());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "defaultAssigneeId must be a valid UUID"));
+        }
+
+        LocalTime dueTime;
+        try {
+            dueTime = parseTime(request.dueTime());
+        } catch (DateTimeParseException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "dueTime must be in HH:mm format"));
+        }
+
+        LocalDate nextOccurrence;
+        try {
+            nextOccurrence = parseDate(request.nextOccurrence());
+        } catch (DateTimeParseException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "nextOccurrence must be in yyyy-MM-dd format"));
+        }
 
         RecurringTaskTemplate template = new RecurringTaskTemplate();
-        template.setTitle(request.title());
-        template.setDescription(request.description());
-        template.setDefaultPriority(request.defaultPriority() != null ? request.defaultPriority() : "Medium");
-        template.setDefaultAssigneeId(request.defaultAssigneeId() != null ? UUID.fromString(request.defaultAssigneeId()) : null);
+        template.setTitle(title);
+        template.setDescription(normalizeString(request.description()));
+        template.setDefaultPriority(normalizeString(request.defaultPriority()) != null ? normalizeString(request.defaultPriority()) : "Medium");
+        template.setDefaultAssigneeId(assigneeId);
         template.setOrganization(department);
         template.setTags(request.tags() != null ? request.tags().toArray(new String[0]) : null);
-        template.setRecurrencePattern(request.recurrencePattern());
+        template.setRecurrencePattern(recurrencePattern);
         template.setRecurrenceDay(request.recurrenceDay());
-        template.setDueTime(request.dueTime() != null ? LocalTime.parse(request.dueTime()) : null);
+        template.setRecurrenceDays(request.recurrenceDays() != null ? request.recurrenceDays().toArray(new Integer[0]) : null);
+        template.setDueTime(dueTime);
         template.setDaysUntilDue(request.daysUntilDue() != null ? request.daysUntilDue() : 1);
-        template.setNextOccurrence(request.nextOccurrence() != null ? LocalDate.parse(request.nextOccurrence()) : LocalDate.now());
+        LocalDate resolvedNextOccurrence = nextOccurrence != null
+            ? nextOccurrence
+            : template.computeNextOccurrence(LocalDate.now(), true);
+        template.setNextOccurrence(resolvedNextOccurrence);
         template.setCreatedBy(userId);
         template.setIsActive(true);
 
@@ -95,17 +134,59 @@ public class RecurringTaskController {
             return ResponseEntity.status(404).body(Map.of("error", "Template not found"));
         }
 
-        if (request.title() != null) template.setTitle(request.title());
-        if (request.description() != null) template.setDescription(request.description());
-        if (request.defaultPriority() != null) template.setDefaultPriority(request.defaultPriority());
-        if (request.defaultAssigneeId() != null) template.setDefaultAssigneeId(UUID.fromString(request.defaultAssigneeId()));
-        if (request.organization() != null) template.setOrganization(request.organization());
+        boolean recurrenceChanged = false;
+
+        if (request.title() != null) {
+            String normalizedTitle = normalizeString(request.title());
+            if (normalizedTitle == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Title cannot be blank"));
+            }
+            template.setTitle(normalizedTitle);
+        }
+        if (request.description() != null) template.setDescription(normalizeString(request.description()));
+        if (request.defaultPriority() != null) template.setDefaultPriority(normalizeString(request.defaultPriority()));
+        if (request.defaultAssigneeId() != null) {
+            try {
+                template.setDefaultAssigneeId(parseUuid(request.defaultAssigneeId()));
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "defaultAssigneeId must be a valid UUID"));
+            }
+        }
+        if (request.organization() != null) template.setOrganization(normalizeString(request.organization()));
         if (request.tags() != null) template.setTags(request.tags().toArray(new String[0]));
-        if (request.recurrencePattern() != null) template.setRecurrencePattern(request.recurrencePattern());
-        if (request.recurrenceDay() != null) template.setRecurrenceDay(request.recurrenceDay());
-        if (request.dueTime() != null) template.setDueTime(LocalTime.parse(request.dueTime()));
+        if (request.recurrencePattern() != null) {
+            String pattern = normalizeString(request.recurrencePattern());
+            if (pattern == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Recurrence pattern cannot be blank"));
+            }
+            template.setRecurrencePattern(pattern);
+            recurrenceChanged = true;
+        }
+        if (request.recurrenceDay() != null) {
+            template.setRecurrenceDay(request.recurrenceDay());
+            recurrenceChanged = true;
+        }
+        if (request.recurrenceDays() != null) {
+            template.setRecurrenceDays(request.recurrenceDays().toArray(new Integer[0]));
+            recurrenceChanged = true;
+        }
+        if (request.dueTime() != null) {
+            try {
+                template.setDueTime(parseTime(request.dueTime()));
+            } catch (DateTimeParseException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "dueTime must be in HH:mm format"));
+            }
+        }
         if (request.daysUntilDue() != null) template.setDaysUntilDue(request.daysUntilDue());
-        if (request.nextOccurrence() != null) template.setNextOccurrence(LocalDate.parse(request.nextOccurrence()));
+        if (request.nextOccurrence() != null) {
+            try {
+                template.setNextOccurrence(parseDate(request.nextOccurrence()));
+            } catch (DateTimeParseException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "nextOccurrence must be in yyyy-MM-dd format"));
+            }
+        } else if (recurrenceChanged) {
+            template.setNextOccurrence(template.computeNextOccurrence(LocalDate.now(), true));
+        }
         if (request.isActive() != null) template.setIsActive(request.isActive());
 
         RecurringTaskTemplate saved = templateRepository.save(template);
@@ -133,6 +214,30 @@ public class RecurringTaskController {
             || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
     }
 
+    private String normalizeString(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private UUID parseUuid(String value) {
+        String trimmed = normalizeString(value);
+        if (trimmed == null) return null;
+        return UUID.fromString(trimmed);
+    }
+
+    private LocalTime parseTime(String value) {
+        String trimmed = normalizeString(value);
+        if (trimmed == null) return null;
+        return LocalTime.parse(trimmed);
+    }
+
+    private LocalDate parseDate(String value) {
+        String trimmed = normalizeString(value);
+        if (trimmed == null) return null;
+        return LocalDate.parse(trimmed);
+    }
+
     public record CreateRecurringTemplateRequest(
         String title,
         String description,
@@ -142,6 +247,7 @@ public class RecurringTaskController {
         List<String> tags,
         String recurrencePattern,
         Integer recurrenceDay,
+        List<Integer> recurrenceDays,
         String dueTime,
         Integer daysUntilDue,
         String nextOccurrence,
