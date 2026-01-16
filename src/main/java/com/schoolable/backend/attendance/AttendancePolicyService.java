@@ -157,7 +157,7 @@ public class AttendancePolicyService {
     }
 
     private boolean isDefaultNonWorkingDay(DayOfWeek day) {
-        return day == DayOfWeek.FRIDAY || day == DayOfWeek.SATURDAY;
+        return day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY;
     }
 
     private double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
