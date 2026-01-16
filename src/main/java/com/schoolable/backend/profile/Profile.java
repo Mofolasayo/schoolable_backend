@@ -401,6 +401,15 @@ public class Profile {
     @Column(name = "reference_face_registered_at")
     private OffsetDateTime referenceFaceRegisteredAt;
 
+    @Column(name = "checkin_device_id")
+    private String checkinDeviceId;
+
+    @Column(name = "checkin_device_info")
+    private String checkinDeviceInfo;
+
+    @Column(name = "checkin_device_registered_at")
+    private OffsetDateTime checkinDeviceRegisteredAt;
+
     public String getReferenceFaceUrl() {
         return referenceFaceUrl;
     }
@@ -415,5 +424,29 @@ public class Profile {
 
     public void setReferenceFaceRegisteredAt(OffsetDateTime referenceFaceRegisteredAt) {
         this.referenceFaceRegisteredAt = referenceFaceRegisteredAt;
+    }
+
+    public String getCheckinDeviceId() {
+        return checkinDeviceId;
+    }
+
+    public void setCheckinDeviceId(String checkinDeviceId) {
+        this.checkinDeviceId = checkinDeviceId;
+    }
+
+    public String getCheckinDeviceInfo() {
+        return checkinDeviceInfo;
+    }
+
+    public void setCheckinDeviceInfo(String checkinDeviceInfo) {
+        this.checkinDeviceInfo = checkinDeviceInfo;
+    }
+
+    public OffsetDateTime getCheckinDeviceRegisteredAt() {
+        return checkinDeviceRegisteredAt;
+    }
+
+    public void setCheckinDeviceRegisteredAt(OffsetDateTime checkinDeviceRegisteredAt) {
+        this.checkinDeviceRegisteredAt = checkinDeviceRegisteredAt;
     }
 }

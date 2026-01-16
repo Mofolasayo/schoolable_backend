@@ -70,10 +70,24 @@ public class TaskController {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
-        UUID assignee = assigneeId != null ? UUID.fromString(assigneeId) : null;
+        UUID assignee = null;
+        if (assigneeId != null) {
+            try {
+                assignee = UUID.fromString(assigneeId);
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid assigneeId"));
+            }
+        }
         String normalizedStatus = normalizeStatus(status);
 
-        var spec = TaskSpecifications.hasAssignee(assignee)
+        List<Long> assignedTaskIds = assignee != null
+            ? taskAssigneeRepository.findByUserIdAndIsActiveTrue(assignee).stream()
+                .map(TaskAssignee::getTaskId)
+                .distinct()
+                .toList()
+            : List.of();
+
+        var spec = TaskSpecifications.hasAssigneeOrTaskIds(assignee, assignedTaskIds)
             .and(TaskSpecifications.hasDepartment(department))
             .and(TaskSpecifications.hasStatus(normalizedStatus))
             .and(TaskSpecifications.hasPriority(priority))
@@ -236,10 +250,17 @@ public class TaskController {
             }
         }
 
+        List<UUID> assigneeIds;
+        try {
+            assigneeIds = parseAssigneeIds(req.assigneeIds(), req.assigneeId());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid assigneeId"));
+        }
+
         Task task = new Task();
         task.setTitle(req.title());
         task.setDescription(req.description());
-        task.setAssigneeId(req.assigneeId() != null ? UUID.fromString(req.assigneeId()) : null);
+        task.setAssigneeId(assigneeIds.isEmpty() ? null : assigneeIds.get(0));
         task.setOrganization(department);
         task.setPriority(req.priority() != null ? req.priority() : "Medium");
         task.setStatus(Task.TaskStatus.TODO.name());
@@ -261,18 +282,8 @@ public class TaskController {
 
         task = taskRepository.save(task);
 
-        if (task.getAssigneeId() != null) {
-            boolean alreadyAssigned = taskAssigneeRepository
-                .existsByTaskIdAndUserIdAndIsActiveTrue(task.getId(), task.getAssigneeId());
-            if (!alreadyAssigned) {
-                TaskAssignee assignment = new TaskAssignee(
-                    task.getId(),
-                    task.getAssigneeId(),
-                    "primary",
-                    userId
-                );
-                taskAssigneeRepository.save(assignment);
-            }
+        if (!assigneeIds.isEmpty()) {
+            syncTaskAssignees(task.getId(), assigneeIds, userId);
         }
 
         // Create subtasks
@@ -323,12 +334,20 @@ public class TaskController {
         }
 
         Task task = taskOpt.get();
-        if (!canManageTask(userId, auth, task)) {
+        if (!canUpdateTaskProgress(userId, auth, task)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
         if (req.title() != null) task.setTitle(req.title());
         if (req.description() != null) task.setDescription(req.description());
-        if (req.assigneeId() != null) task.setAssigneeId(UUID.fromString(req.assigneeId()));
+        List<UUID> assigneeIdsToSync = null;
+        if (req.assigneeIds() != null || req.assigneeId() != null) {
+            try {
+                assigneeIdsToSync = parseAssigneeIds(req.assigneeIds(), req.assigneeId());
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid assigneeId"));
+            }
+            task.setAssigneeId(assigneeIdsToSync.isEmpty() ? null : assigneeIdsToSync.get(0));
+        }
         if (req.organization() != null) task.setOrganization(req.organization());
         if (req.priority() != null) task.setPriority(req.priority());
         if (req.status() != null) {
@@ -362,6 +381,9 @@ public class TaskController {
         }
 
         taskRepository.save(task);
+        if (assigneeIdsToSync != null) {
+            syncTaskAssignees(task.getId(), assigneeIdsToSync, userId);
+        }
         
         // Broadcast task update via WebSocket
         Map<String, Object> taskResponse = buildTaskResponse(task);
@@ -384,7 +406,7 @@ public class TaskController {
         }
 
         Task task = taskOpt.get();
-        if (!canManageTask(userId, auth, task)) {
+        if (!canUpdateTaskProgress(userId, auth, task)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
         String oldStatus = task.getStatus();
@@ -470,7 +492,7 @@ public class TaskController {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
         }
         UUID userId = (UUID) auth.getPrincipal();
-        if (!canManageTask(userId, auth, taskOpt.get())) {
+        if (!canUpdateTaskProgress(userId, auth, taskOpt.get())) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -500,7 +522,7 @@ public class TaskController {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
         }
         UUID userId = (UUID) auth.getPrincipal();
-        if (!canManageTask(userId, auth, taskOpt.get())) {
+        if (!canUpdateTaskProgress(userId, auth, taskOpt.get())) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
 
@@ -755,6 +777,59 @@ public class TaskController {
         }
     }
 
+    private List<UUID> parseAssigneeIds(List<String> assigneeIds, String assigneeId) {
+        LinkedHashSet<String> uniqueIds = new LinkedHashSet<>();
+        if (assigneeIds != null) {
+            for (String id : assigneeIds) {
+                if (id != null && !id.isBlank()) {
+                    uniqueIds.add(id.trim());
+                }
+            }
+        }
+        if (assigneeId != null && !assigneeId.isBlank()) {
+            uniqueIds.add(assigneeId.trim());
+        }
+        List<UUID> parsed = new ArrayList<>();
+        for (String id : uniqueIds) {
+            parsed.add(UUID.fromString(id));
+        }
+        return parsed;
+    }
+
+    private void syncTaskAssignees(Long taskId, List<UUID> assigneeIds, UUID assignedBy) {
+        List<TaskAssignee> activeAssignments = taskAssigneeRepository.findByTaskIdAndIsActiveTrue(taskId);
+        Map<UUID, TaskAssignee> activeByUser = new HashMap<>();
+        for (TaskAssignee assignment : activeAssignments) {
+            activeByUser.put(assignment.getUserId(), assignment);
+        }
+
+        Set<UUID> desired = new LinkedHashSet<>(assigneeIds);
+        List<TaskAssignee> updates = new ArrayList<>();
+
+        for (TaskAssignee assignment : activeAssignments) {
+            if (!desired.contains(assignment.getUserId())) {
+                assignment.setIsActive(false);
+                updates.add(assignment);
+            }
+        }
+
+        for (UUID assignee : desired) {
+            TaskAssignee assignment = activeByUser.get(assignee);
+            String role = "assignee";
+            if (assignment == null) {
+                assignment = new TaskAssignee(taskId, assignee, role, assignedBy);
+            } else {
+                assignment.setRole(role);
+                assignment.setIsActive(true);
+            }
+            updates.add(assignment);
+        }
+
+        if (!updates.isEmpty()) {
+            taskAssigneeRepository.saveAll(updates);
+        }
+    }
+
     private Map<String, Object> buildTaskResponse(Task task) {
         Map<String, Object> response = new HashMap<>();
         response.put("id", task.getId());
@@ -788,6 +863,21 @@ public class TaskController {
             var profileOpt = profileRepository.findById(task.getAssigneeId());
             profileOpt.ifPresent(profile -> response.put("assignee", buildProfileSummary(profile)));
         }
+
+        List<TaskAssignee> assignees = taskAssigneeRepository.findByTaskIdAndIsActiveTrue(task.getId());
+        List<Map<String, Object>> assigneeSummaries = new ArrayList<>();
+        for (TaskAssignee assignment : assignees) {
+            Map<String, Object> summary = new HashMap<>();
+            Profile profile = profileRepository.findById(assignment.getUserId()).orElse(null);
+            if (profile != null) {
+                summary.putAll(buildProfileSummary(profile));
+            } else {
+                summary.put("id", assignment.getUserId());
+            }
+            summary.put("role", "assignee");
+            assigneeSummaries.add(summary);
+        }
+        response.put("assignees", assigneeSummaries);
 
         // Get subtasks
         List<TaskSubtask> subtasks = subtaskRepository.findByTaskIdOrderByIdAsc(task.getId());
@@ -873,7 +963,7 @@ public class TaskController {
         if (current == null || current == next) return true;
 
         return switch (current) {
-            case TODO -> next == Task.TaskStatus.IN_PROGRESS || next == Task.TaskStatus.CANCELLED;
+            case TODO -> next == Task.TaskStatus.IN_PROGRESS || next == Task.TaskStatus.DONE || next == Task.TaskStatus.CANCELLED;
             case IN_PROGRESS -> next == Task.TaskStatus.REVIEW || next == Task.TaskStatus.DONE || next == Task.TaskStatus.CANCELLED;
             case REVIEW -> next == Task.TaskStatus.DONE || next == Task.TaskStatus.IN_PROGRESS || next == Task.TaskStatus.CANCELLED;
             case DONE -> next == Task.TaskStatus.IN_PROGRESS;
@@ -912,6 +1002,12 @@ public class TaskController {
             profile.getDepartment() != null && profile.getDepartment().equals(task.getOrganization());
     }
 
+    private boolean canUpdateTaskProgress(UUID userId, Authentication auth, Task task) {
+        if (canManageTask(userId, auth, task)) return true;
+        if (userId.equals(task.getAssigneeId())) return true;
+        return taskAssigneeRepository.existsByTaskIdAndUserIdAndIsActiveTrue(task.getId(), userId);
+    }
+
     private boolean isAdmin(Authentication auth) {
         if (auth == null) return false;
         return auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))
@@ -924,6 +1020,7 @@ public class TaskController {
             String title,
             String description,
             String assigneeId,
+            List<String> assigneeIds,
             String organization,
             String priority,
             String dueDate,
@@ -944,6 +1041,7 @@ public class TaskController {
             String title,
             String description,
             String assigneeId,
+            List<String> assigneeIds,
             String organization,
             String priority,
             String status,

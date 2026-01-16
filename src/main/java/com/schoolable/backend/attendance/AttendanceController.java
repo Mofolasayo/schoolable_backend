@@ -111,6 +111,32 @@ public class AttendanceController {
             ));
         }
 
+        Profile profile = profileRepository.findById(userId).orElse(null);
+        if (requiresBiometric) {
+            String deviceId = normalizeString(req.deviceId());
+            if (deviceId == null) {
+                return ResponseEntity.status(403).body(Map.of(
+                    "error", "Verification failed",
+                    "code", "VERIFICATION_FAILED"
+                ));
+            }
+
+            if (profile != null) {
+                String registeredDeviceId = normalizeString(profile.getCheckinDeviceId());
+                if (registeredDeviceId == null) {
+                    profile.setCheckinDeviceId(deviceId);
+                    profile.setCheckinDeviceInfo(req.deviceInfo());
+                    profile.setCheckinDeviceRegisteredAt(OffsetDateTime.now());
+                    profileRepository.save(profile);
+                } else if (!registeredDeviceId.equals(deviceId)) {
+                    return ResponseEntity.status(403).body(Map.of(
+                        "error", "Verification failed",
+                        "code", "VERIFICATION_FAILED"
+                    ));
+                }
+            }
+        }
+
         // Create attendance record
         Attendance attendance = new Attendance();
         attendance.setUserId(userId);
@@ -146,8 +172,8 @@ public class AttendanceController {
         }
         if (requiresBiometric && Boolean.FALSE.equals(attendance.getLivenessPassed())) {
             return ResponseEntity.status(403).body(Map.of(
-                "error", "Liveness check failed",
-                "code", "LIVENESS_FAILED"
+                "error", "Verification failed",
+                "code", "VERIFICATION_FAILED"
             ));
         }
         
@@ -160,7 +186,6 @@ public class AttendanceController {
         attendance.setRetentionUntil(OffsetDateTime.now().plusDays(consent.getRetentionDays()));
 
         if (requiresBiometric && req.photoUrl() != null && !Boolean.FALSE.equals(attendance.getLivenessPassed())) {
-            Profile profile = profileRepository.findById(userId).orElse(null);
             if (profile != null) {
                 if (profile.getReferenceFaceUrl() == null || profile.getReferenceFaceUrl().isBlank()) {
                     profile.setReferenceFaceUrl(req.photoUrl());
@@ -175,10 +200,8 @@ public class AttendanceController {
                     attendance.setFaceMatchProvider(matchResult.provider());
                     if (!matchResult.match()) {
                         return ResponseEntity.status(403).body(Map.of(
-                            "error", "Face verification failed",
-                            "code", "FACE_MISMATCH",
-                            "confidence", matchResult.confidence(),
-                            "provider", matchResult.provider()
+                            "error", "Verification failed",
+                            "code", "VERIFICATION_FAILED"
                         ));
                     }
                     attendance.setVerificationStatus("verified");
@@ -923,6 +946,12 @@ public class AttendanceController {
             || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
     }
 
+    private String normalizeString(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     // ==================== REQUEST/RESPONSE RECORDS ====================
 
     public record CheckInRequest(
@@ -934,6 +963,8 @@ public class AttendanceController {
             String photoUrl,
             @JsonAlias({"device_info"})
             String deviceInfo,
+            @JsonAlias({"device_id", "deviceId"})
+            String deviceId,
             String note,
             @JsonAlias({"is_remote"})
             Boolean isRemote,

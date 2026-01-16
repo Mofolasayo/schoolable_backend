@@ -6,8 +6,8 @@ import java.util.UUID;
 
 /**
  * Task Assignee Entity
- * Supports multiple assignees per task with contribution tracking.
- * Primary assignee remains in Task.assigneeId for backward compatibility.
+ * Supports multiple assignees per task.
+ * Task.assigneeId mirrors the first assignee for backward compatibility.
  */
 @Entity
 @Table(name = "task_assignees")
@@ -24,7 +24,7 @@ public class TaskAssignee {
     private UUID userId;
 
     @Column(name = "role", nullable = false, length = 50)
-    private String role = "contributor"; // "primary", "reviewer", "contributor"
+    private String role = "assignee";
 
     @Column(name = "contribution_percent")
     private Integer contributionPercent = 0; // 0-100, for credit distribution

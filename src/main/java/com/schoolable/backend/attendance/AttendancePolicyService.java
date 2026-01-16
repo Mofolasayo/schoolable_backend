@@ -140,17 +140,18 @@ public class AttendancePolicyService {
             return false;
         }
         DayOfWeek target = date.getDayOfWeek();
-        String targetName = target.name().toLowerCase(Locale.ROOT);
-        String targetShort = targetName.substring(0, 3);
-        String targetIndex = Integer.toString(target.getValue());
-
         for (String entry : daysOfWeek) {
             if (entry == null) continue;
             String normalized = entry.trim().toLowerCase(Locale.ROOT);
             if (normalized.isEmpty()) continue;
-            if (normalized.equals(targetIndex)) return true;
-            if (normalized.equals(targetName)) return true;
-            if (normalized.startsWith(targetShort)) return true;
+            String[] tokens = normalized.split(",");
+            for (String token : tokens) {
+                String trimmed = token.trim();
+                if (trimmed.isEmpty()) continue;
+                if (matchesScheduleToken(trimmed, target)) {
+                    return true;
+                }
+            }
         }
 
         return false;
@@ -158,6 +159,58 @@ public class AttendancePolicyService {
 
     private boolean isDefaultNonWorkingDay(DayOfWeek day) {
         return day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY;
+    }
+
+    private boolean matchesScheduleToken(String token, DayOfWeek target) {
+        if (token.equals("weekday") || token.equals("weekdays") || token.equals("workday") || token.equals("workdays")) {
+            return target.getValue() >= DayOfWeek.MONDAY.getValue() && target.getValue() <= DayOfWeek.FRIDAY.getValue();
+        }
+        if (token.equals("weekend") || token.equals("weekends")) {
+            return target == DayOfWeek.SATURDAY || target == DayOfWeek.SUNDAY;
+        }
+        if (token.contains("-")) {
+            String[] parts = token.split("-", 2);
+            Integer start = resolveDayValue(parts[0]);
+            Integer end = resolveDayValue(parts[1]);
+            if (start == null || end == null) {
+                return false;
+            }
+            int targetValue = target.getValue();
+            if (start <= end) {
+                return targetValue >= start && targetValue <= end;
+            }
+            return targetValue >= start || targetValue <= end;
+        }
+
+        Integer direct = resolveDayValue(token);
+        return direct != null && direct == target.getValue();
+    }
+
+    private Integer resolveDayValue(String token) {
+        if (token == null) return null;
+        String normalized = token.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) return null;
+
+        if (normalized.chars().allMatch(Character::isDigit)) {
+            try {
+                int value = Integer.parseInt(normalized);
+                if (value >= DayOfWeek.MONDAY.getValue() && value <= DayOfWeek.SUNDAY.getValue()) {
+                    return value;
+                }
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+
+        if (normalized.startsWith("mon")) return DayOfWeek.MONDAY.getValue();
+        if (normalized.startsWith("tue")) return DayOfWeek.TUESDAY.getValue();
+        if (normalized.startsWith("wed")) return DayOfWeek.WEDNESDAY.getValue();
+        if (normalized.startsWith("thu")) return DayOfWeek.THURSDAY.getValue();
+        if (normalized.startsWith("fri")) return DayOfWeek.FRIDAY.getValue();
+        if (normalized.startsWith("sat")) return DayOfWeek.SATURDAY.getValue();
+        if (normalized.startsWith("sun")) return DayOfWeek.SUNDAY.getValue();
+
+        return null;
     }
 
     private double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
