@@ -119,6 +119,8 @@ public ResponseEntity<?> debugToken(@RequestParam("token") String token) {
         response.put("city", p.getCity() != null ? p.getCity() : "");
         response.put("state", p.getState() != null ? p.getState() : "");
         response.put("is_team_lead", p.getIsTeamLead() != null ? p.getIsTeamLead() : false);
+        response.put("team_lead_request_status", p.getTeamLeadRequestStatus() != null ? p.getTeamLeadRequestStatus() : "none");
+        response.put("team_lead_requested_at", p.getTeamLeadRequestedAt() != null ? p.getTeamLeadRequestedAt().toString() : null);
         if (p.getDateOfBirth() != null) {
             response.put("date_of_birth", p.getDateOfBirth().toString());
         }

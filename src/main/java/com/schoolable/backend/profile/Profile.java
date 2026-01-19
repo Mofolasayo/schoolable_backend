@@ -257,6 +257,12 @@ public class Profile {
     @Column(name = "is_team_lead")
     private Boolean isTeamLead = false;
 
+    @Column(name = "team_lead_request_status")
+    private String teamLeadRequestStatus = "none";
+
+    @Column(name = "team_lead_requested_at")
+    private OffsetDateTime teamLeadRequestedAt;
+
     @Column(name = "base_salary")
     private java.math.BigDecimal baseSalary;
 
@@ -317,6 +323,22 @@ public class Profile {
 
     public void setIsTeamLead(Boolean isTeamLead) {
         this.isTeamLead = isTeamLead;
+    }
+
+    public String getTeamLeadRequestStatus() {
+        return teamLeadRequestStatus;
+    }
+
+    public void setTeamLeadRequestStatus(String teamLeadRequestStatus) {
+        this.teamLeadRequestStatus = teamLeadRequestStatus;
+    }
+
+    public OffsetDateTime getTeamLeadRequestedAt() {
+        return teamLeadRequestedAt;
+    }
+
+    public void setTeamLeadRequestedAt(OffsetDateTime teamLeadRequestedAt) {
+        this.teamLeadRequestedAt = teamLeadRequestedAt;
     }
 
     public java.math.BigDecimal getBaseSalary() {

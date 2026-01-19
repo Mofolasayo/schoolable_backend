@@ -16,6 +16,7 @@ public class TeamLeadAppointment {
     public static final String STATUS_ACTING = "acting";
     public static final String STATUS_CONFIRMED = "confirmed";
     public static final String STATUS_ENDED = "ended";
+    public static final String STATUS_PENDING = "pending";
     
     @Id
     @GeneratedValue

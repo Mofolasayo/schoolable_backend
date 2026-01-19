@@ -511,6 +511,7 @@ public class GeminiAiService {
             kpiData,
             memberFeedback,
             null,
+            null,
             weekNumber,
             year,
             null
@@ -523,11 +524,13 @@ public class GeminiAiService {
             List<KpiProgressData> kpiData,
             List<TeamMemberFeedback> memberFeedback,
             String teamReportText,
+            String teamContextText,
             int weekNumber,
             int year,
             UUID jobId) {
 
-        String prompt = buildEnhancedWeeklyAnalysisPrompt(teamName, department, kpiData, memberFeedback, teamReportText, weekNumber, year);
+        String prompt = buildEnhancedWeeklyAnalysisPrompt(
+            teamName, department, kpiData, memberFeedback, teamReportText, teamContextText, weekNumber, year);
         GeminiResponse aiResponse = generateStructuredJson(
             prompt,
             insightsTemperature,
@@ -553,6 +556,7 @@ public class GeminiAiService {
             List<KpiProgressData> kpiData,
             List<TeamMemberFeedback> memberFeedback,
             String teamReportText,
+            String teamContextText,
             int weekNumber,
             int year) {
 
@@ -612,6 +616,11 @@ public class GeminiAiService {
             sb.append("Use this document to validate KPI progress and score realism. If the document conflicts with KPI progress, adjust the score downward.\n");
         } else {
             sb.append("\n(No team report document text available for this week.)\n");
+        }
+
+        if (teamContextText != null && !teamContextText.isBlank()) {
+            sb.append("\n=== TEAM CONTEXT SNAPSHOT ===\n");
+            sb.append(teamContextText).append("\n");
         }
 
         sb.append("\n=== ADDITIONAL CONTEXT ===\n");

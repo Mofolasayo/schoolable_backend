@@ -221,9 +221,15 @@ public class IndividualKpiController {
         kpi.setWeight(request.weight());
         kpi.setQuarter(quarter);
         kpi.setYear(year);
-        kpi.setProgressSource(request.progressSource());
+        String progressSource = request.progressSource() != null && !request.progressSource().isBlank()
+            ? request.progressSource()
+            : "DAILY_REPORT_KPI_ALIGNMENT";
+        kpi.setProgressSource(progressSource);
         kpi.setProgressConfig(request.progressConfig());
-        kpi.setAutoProgressEnabled(request.autoProgressEnabled() != null ? request.autoProgressEnabled() : false);
+        boolean autoProgressEnabled = request.autoProgressEnabled() != null
+            ? request.autoProgressEnabled()
+            : (progressSource != null && !progressSource.isBlank());
+        kpi.setAutoProgressEnabled(autoProgressEnabled);
 
         kpi = individualKpiRepository.save(kpi);
 
@@ -289,7 +295,12 @@ public class IndividualKpiController {
             kpi.setWeight(request.weight());
         }
         if (request.isActive() != null) kpi.setIsActive(request.isActive());
-        if (request.progressSource() != null) kpi.setProgressSource(request.progressSource());
+        if (request.progressSource() != null) {
+            kpi.setProgressSource(request.progressSource());
+            if (request.autoProgressEnabled() == null) {
+                kpi.setAutoProgressEnabled(true);
+            }
+        }
         if (request.progressConfig() != null) kpi.setProgressConfig(request.progressConfig());
         if (request.autoProgressEnabled() != null) kpi.setAutoProgressEnabled(request.autoProgressEnabled());
 

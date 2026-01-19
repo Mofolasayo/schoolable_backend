@@ -56,6 +56,9 @@ public class Task {
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
 
+    @Column(name = "completed_at")
+    private OffsetDateTime completedAt;
+
     // Quality Rating System - Creator rates assignee after completion
     @Column(name = "quality_rating")
     private Integer qualityRating; // 1-5 stars
@@ -150,6 +153,9 @@ public class Task {
 
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    public OffsetDateTime getCompletedAt() { return completedAt; }
+    public void setCompletedAt(OffsetDateTime completedAt) { this.completedAt = completedAt; }
 
     public Integer getQualityRating() { return qualityRating; }
     public void setQualityRating(Integer qualityRating) { this.qualityRating = qualityRating; }

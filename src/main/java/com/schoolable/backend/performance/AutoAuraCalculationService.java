@@ -6,6 +6,7 @@ import com.schoolable.backend.attendance.AttendancePolicyService;
 import com.schoolable.backend.attendance.AttendanceRepository;
 import com.schoolable.backend.attendance.WorkSchedule;
 import com.schoolable.backend.compliance.ComplianceSubmissionRepository;
+import com.schoolable.backend.kpi.IndividualKpiRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.task.Task;
@@ -84,6 +85,9 @@ public class AutoAuraCalculationService {
     private ProfileRepository profileRepository;
 
     @Autowired
+    private IndividualKpiRepository individualKpiRepository;
+
+    @Autowired
     private AttendancePolicyService attendancePolicyService;
 
     @Autowired(required = false)
@@ -145,7 +149,7 @@ public class AutoAuraCalculationService {
         LocalDate now = LocalDate.now();
 
         // ============ ONBOARDING GRACE PERIOD ============
-        // New employees (< 30 days) get a gradual ramp-up
+        // New employees (< 7 days) get a gradual ramp-up
         // This prevents 0% scores for employees who haven't had time to generate data
         double onboardingFactor = 1.0; // 1.0 = full weighting, no grace
         boolean isOnboarding = false;
@@ -155,10 +159,10 @@ public class AutoAuraCalculationService {
             daysEmployed = ChronoUnit.DAYS.between(
                 profile.getDateJoined().toLocalDate(), now);
             
-            if (daysEmployed < 30) {
+            if (daysEmployed < 7) {
                 isOnboarding = true;
-                // Linear ramp: Day 0 = 0.3, Day 30 = 1.0
-                onboardingFactor = 0.3 + (0.7 * daysEmployed / 30.0);
+                // Linear ramp: Day 0 = 0.3, Day 7 = 1.0
+                onboardingFactor = 0.3 + (0.7 * daysEmployed / 7.0);
             }
         }
         // =================================================
@@ -217,9 +221,9 @@ public class AutoAuraCalculationService {
         if (isOnboarding) {
             result.put("isOnboarding", true);
             result.put("daysEmployed", daysEmployed);
-            result.put("onboardingDaysRemaining", 30 - daysEmployed);
+            result.put("onboardingDaysRemaining", 7 - daysEmployed);
             result.put("onboardingMessage", 
-                "You're in your onboarding period (" + daysEmployed + "/30 days). " +
+                "You're in your onboarding period (" + daysEmployed + "/7 days). " +
                 "Scores are adjusted while you build your performance history.");
         }
 
@@ -309,6 +313,8 @@ public class AutoAuraCalculationService {
                     return calculateDailyReportMetric(employeeId, metricKey, metricConfig, quarterStart, now, context);
                 case "weekly_report":
                     return calculateTeamLeadRating(employeeId, metricKey, metricConfig, quarterStart);
+                case "individual_kpis":
+                    return calculateIndividualKpiMetric(employeeId, now);
                 case "aura":
                     return calculateHistoricalMetric(employeeId, metricKey, metricConfig);
                 default:
@@ -344,6 +350,47 @@ public class AutoAuraCalculationService {
         }
 
         switch (metricKey) {
+            case "task_performance": {
+                long completed = activeTasks.stream().filter(this::isTaskDone).count();
+                double completionScore = activeTasks.isEmpty() ? 0.0 : (completed * 100.0) / activeTasks.size();
+
+                List<Task> completedTasks = activeTasks.stream().filter(this::isTaskDone).toList();
+                long withDueDates = completedTasks.stream().filter(t -> t.getDueDate() != null).count();
+                long onTime = completedTasks.stream()
+                    .filter(t -> t.getDueDate() != null && resolveCompletionTime(t) != null)
+                    .filter(t -> !resolveCompletionTime(t).isAfter(t.getDueDate()))
+                    .count();
+                double onTimeScore = withDueDates > 0 ? (onTime * 100.0) / withDueDates : 0.0;
+
+                Double avgRating = taskRepository.getAverageQualityRatingAfter(
+                    profile.getId(), quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC));
+                long ratedCount = taskRepository.countRatedTasksAfter(
+                    profile.getId(), quarterStart.atStartOfDay().atOffset(ZoneOffset.UTC));
+                double qualityScore = avgRating != null ? (avgRating / 5.0) * 100 : 0.0;
+
+                double completionWeight = 0.4;
+                double onTimeWeight = withDueDates > 0 ? 0.3 : 0.0;
+                double qualityWeight = avgRating != null ? 0.3 : 0.0;
+                double weightTotal = completionWeight + onTimeWeight + qualityWeight;
+                double score = weightTotal > 0
+                    ? (completionScore * completionWeight +
+                       onTimeScore * onTimeWeight +
+                       qualityScore * qualityWeight) / weightTotal
+                    : 0.0;
+
+                Map<String, Object> raw = new LinkedHashMap<>();
+                raw.put("totalTasks", activeTasks.size());
+                raw.put("completedTasks", completed);
+                raw.put("completedWithDueDate", withDueDates);
+                raw.put("onTime", onTime);
+                raw.put("ratedTasks", ratedCount);
+                raw.put("averageRating", avgRating);
+                raw.put("completionScore", Math.round(completionScore * 10.0) / 10.0);
+                raw.put("onTimeScore", Math.round(onTimeScore * 10.0) / 10.0);
+                raw.put("qualityScore", Math.round(qualityScore * 10.0) / 10.0);
+                return MetricResult.of(score, raw);
+            }
+
             case "task_completion_rate":
             case "task_completion": {
                 long completed = activeTasks.stream().filter(this::isTaskDone).count();
@@ -361,8 +408,8 @@ public class AutoAuraCalculationService {
                 List<Task> completedTasks = activeTasks.stream().filter(this::isTaskDone).toList();
                 long withDueDates = completedTasks.stream().filter(t -> t.getDueDate() != null).count();
                 long onTime = completedTasks.stream()
-                    .filter(t -> t.getDueDate() != null && t.getUpdatedAt() != null)
-                    .filter(t -> !t.getUpdatedAt().isAfter(t.getDueDate()))
+                    .filter(t -> t.getDueDate() != null && resolveCompletionTime(t) != null)
+                    .filter(t -> !resolveCompletionTime(t).isAfter(t.getDueDate()))
                     .count();
                 double score = withDueDates > 0 ? (onTime * 100.0) / withDueDates : 0.0;
 
@@ -486,6 +533,23 @@ public class AutoAuraCalculationService {
             default:
                 return calculateTaskMetric(profile, "task_completion_rate", config, quarterStart, now, context);
         }
+    }
+
+    private MetricResult calculateIndividualKpiMetric(UUID employeeId, LocalDate now) {
+        String quarter = getQuarterForDate(now);
+        int year = now.getYear();
+
+        Double avgAchievement = individualKpiRepository.getAverageAchievement(employeeId, quarter, year);
+        Integer totalWeight = individualKpiRepository.getTotalWeight(employeeId, quarter, year);
+
+        double score = avgAchievement != null ? Math.max(0, Math.min(100.0, avgAchievement)) : 0.0;
+
+        Map<String, Object> raw = new LinkedHashMap<>();
+        raw.put("quarter", quarter);
+        raw.put("year", year);
+        raw.put("averageAchievement", avgAchievement);
+        raw.put("totalWeight", totalWeight);
+        return MetricResult.of(score, raw);
     }
 
     // ============================================================
@@ -1231,6 +1295,10 @@ public class AutoAuraCalculationService {
 
     private boolean isTaskDone(Task task) {
         return normalizeTaskStatus(task.getStatus()) == Task.TaskStatus.DONE;
+    }
+
+    private OffsetDateTime resolveCompletionTime(Task task) {
+        return task.getCompletedAt() != null ? task.getCompletedAt() : task.getUpdatedAt();
     }
 
     private LocalTime resolveCheckInTime(Attendance attendance, WorkSchedule schedule) {

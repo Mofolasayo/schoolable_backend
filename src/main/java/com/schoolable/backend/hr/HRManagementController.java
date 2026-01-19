@@ -121,6 +121,106 @@ public class HRManagementController {
         }
     }
 
+    /**
+     * Get pending team lead requests.
+     */
+    @GetMapping("/team-leads/requests")
+    public ResponseEntity<?> getPendingTeamLeadRequests() {
+        return ResponseEntity.ok(hrService.getPendingTeamLeadRequests());
+    }
+
+    /**
+     * Approve a pending team lead request.
+     */
+    @PostMapping("/team-leads/requests/{employeeId}/approve")
+    public ResponseEntity<?> approveTeamLeadRequest(
+            Authentication auth,
+            @PathVariable UUID employeeId,
+            @RequestBody(required = false) Map<String, Object> request
+    ) {
+        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        String teamName = request != null ? (String) request.get("teamName") : null;
+
+        try {
+            TeamLeadAppointment appointment = hrService.approveTeamLeadRequest(employeeId, teamName, userId);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Team lead approved successfully",
+                "appointmentId", appointment.getId()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * Reject a pending team lead request.
+     */
+    @PostMapping("/team-leads/requests/{employeeId}/reject")
+    public ResponseEntity<?> rejectTeamLeadRequest(
+            Authentication auth,
+            @PathVariable UUID employeeId,
+            @RequestBody Map<String, Object> request
+    ) {
+        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        String reason = request != null ? (String) request.get("reason") : null;
+
+        try {
+            hrService.rejectTeamLeadRequest(employeeId, userId, reason);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Team lead request rejected"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", e.getMessage()
+            ));
+        }
+    }
+
+    // =====================================================
+    // TEAMS
+    // =====================================================
+
+    /**
+     * Get all teams.
+     */
+    @GetMapping("/teams")
+    public ResponseEntity<?> getTeams() {
+        return ResponseEntity.ok(hrService.getTeams());
+    }
+
+    /**
+     * Create a new team.
+     */
+    @PostMapping("/teams")
+    public ResponseEntity<?> createTeam(
+            Authentication auth,
+            @RequestBody Map<String, Object> request
+    ) {
+        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        String name = request.get("name") != null ? request.get("name").toString() : null;
+        String description = request.get("description") != null ? request.get("description").toString() : null;
+
+        try {
+            Team team = hrService.createTeam(name, description, userId);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Team created successfully",
+                "teamId", team.getId()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", e.getMessage()
+            ));
+        }
+    }
+
     // =====================================================
     // PROBATION
     // =====================================================
@@ -153,7 +253,7 @@ public class HRManagementController {
         UUID employeeId = UUID.fromString((String) request.get("employeeId"));
         LocalDate startDate = LocalDate.parse((String) request.get("startDate"));
         int months = request.get("probationMonths") != null ? 
-            ((Number) request.get("probationMonths")).intValue() : 3;
+            ((Number) request.get("probationMonths")).intValue() : 6;
         UUID supervisorId = request.get("supervisorId") != null ? 
             UUID.fromString((String) request.get("supervisorId")) : null;
 

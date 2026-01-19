@@ -1,8 +1,12 @@
 package com.schoolable.backend.kpi;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -43,6 +47,10 @@ public class TeamQuarterlyScore {
 
     @Column(name = "overall_team_score", precision = 5, scale = 2)
     private BigDecimal overallTeamScore;  // Combined score
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "score_breakdown", columnDefinition = "jsonb")
+    private Map<String, Object> scoreBreakdown;
 
     @Column(length = 2)
     private String grade;  // A, B, C, D, F
@@ -109,6 +117,9 @@ public class TeamQuarterlyScore {
 
     public BigDecimal getOverallTeamScore() { return overallTeamScore; }
     public void setOverallTeamScore(BigDecimal overallTeamScore) { this.overallTeamScore = overallTeamScore; }
+
+    public Map<String, Object> getScoreBreakdown() { return scoreBreakdown; }
+    public void setScoreBreakdown(Map<String, Object> scoreBreakdown) { this.scoreBreakdown = scoreBreakdown; }
 
     public String getGrade() { return grade; }
     public void setGrade(String grade) { this.grade = grade; }

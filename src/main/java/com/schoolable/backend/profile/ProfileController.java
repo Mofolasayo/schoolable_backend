@@ -40,12 +40,15 @@ public class ProfileController {
     private final ProfileRepository profileRepository;
     private final StorageService storageService;
     private final com.schoolable.backend.hr.JobLevelRepository jobLevelRepository;
+    private final com.schoolable.backend.hr.HRManagementService hrManagementService;
 
     public ProfileController(ProfileRepository profileRepository, StorageService storageService,
-                             com.schoolable.backend.hr.JobLevelRepository jobLevelRepository) {
+                             com.schoolable.backend.hr.JobLevelRepository jobLevelRepository,
+                             com.schoolable.backend.hr.HRManagementService hrManagementService) {
         this.profileRepository = profileRepository;
         this.storageService = storageService;
         this.jobLevelRepository = jobLevelRepository;
+        this.hrManagementService = hrManagementService;
     }
 
     @Operation(summary = "Get current user profile")
@@ -216,7 +219,16 @@ public class ProfileController {
             p.setState(req.state());
             
             if (req.isTeamLead() != null) {
-                p.setIsTeamLead(req.isTeamLead());
+                if (Boolean.TRUE.equals(req.isTeamLead())) {
+                    p.setIsTeamLead(false);
+                    p.setTeamLeadRequestStatus("pending");
+                    p.setTeamLeadRequestedAt(OffsetDateTime.now());
+                } else {
+                    p.setIsTeamLead(false);
+                    if (p.getTeamLeadRequestStatus() == null) {
+                        p.setTeamLeadRequestStatus("none");
+                    }
+                }
             }
 
             // Sync Employee Level, Job Level, and Grade
@@ -234,6 +246,11 @@ public class ProfileController {
                     // For now, just set jobLevel to employeeLevel to at least have it saved
                     p.setJobLevel(req.employeeLevel());
                 }
+            } else {
+                Integer inferredGrade = inferGradeFromJobTitle(p.getJobTitle());
+                if (inferredGrade != null) {
+                    p.setGrade(inferredGrade);
+                }
             }
 
             p.setStatus("active");
@@ -241,6 +258,7 @@ public class ProfileController {
             p.setUpdatedAt(OffsetDateTime.now());
 
             profileRepository.save(p);
+            hrManagementService.ensureProbationForNewHire(p, userId, 6);
             log.info("Profile completed for userId={}", userId);
 
             return ResponseEntity.ok(buildProfileResponse(p));
@@ -439,6 +457,9 @@ public class ProfileController {
         response.put("job_title", p.getJobTitle());
         response.put("department", p.getDepartment());
         response.put("status", p.getStatus());
+        response.put("is_team_lead", p.getIsTeamLead() != null ? p.getIsTeamLead() : false);
+        response.put("team_lead_request_status", p.getTeamLeadRequestStatus() != null ? p.getTeamLeadRequestStatus() : "none");
+        response.put("team_lead_requested_at", p.getTeamLeadRequestedAt());
         
         // Auto-generate avatar_url if not set
         String avatarUrl = p.getAvatarUrl();
@@ -511,6 +532,35 @@ public class ProfileController {
         } catch (DateTimeParseException e) {
             throw new RuntimeException("Unable to parse date: " + dateTimeStr, e);
         }
+    }
+
+    private Integer inferGradeFromJobTitle(String jobTitle) {
+        if (jobTitle == null || jobTitle.isBlank()) {
+            return null;
+        }
+
+        String normalized = jobTitle.toLowerCase();
+
+        if (normalized.contains("director") || normalized.contains("general manager")) {
+            return 6;
+        }
+        if (normalized.contains("chief") || normalized.contains("c-suite") || normalized.contains("deputy") || normalized.contains("assistant general manager")) {
+            return 5;
+        }
+        if (normalized.contains("manager")) {
+            return 4;
+        }
+        if (normalized.contains("team lead") || normalized.contains("lead") || normalized.contains("associate") || normalized.contains("analyst") || normalized.contains("officer") || normalized.contains("executive")) {
+            return 3;
+        }
+        if (normalized.contains("intern") || normalized.contains("trainee") || normalized.contains("nysc")) {
+            return 2;
+        }
+        if (normalized.contains("contract") || normalized.contains("siwes")) {
+            return 1;
+        }
+
+        return null;
     }
 
     public record CompleteProfileRequest(

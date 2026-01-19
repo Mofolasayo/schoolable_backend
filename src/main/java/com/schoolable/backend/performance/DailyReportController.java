@@ -619,6 +619,10 @@ public class DailyReportController {
         dto.put("attachmentName", r.getAttachmentName());
         dto.put("aiScore", r.getAiScore());
         dto.put("aiFeedback", r.getAiFeedback());
+        dto.put("aiSuggestions", r.getAiSuggestions());
+        dto.put("aiStrengths", r.getAiStrengths());
+        dto.put("aiImprovements", r.getAiImprovements());
+        dto.put("aiAuraBoostTips", r.getAiAuraBoostTips());
         dto.put("aiGradedAt", r.getAiGradedAt());
         dto.put("kpiAlignmentScore", r.getKpiAlignmentScore());
         dto.put("aiJobId", r.getAiJobId());

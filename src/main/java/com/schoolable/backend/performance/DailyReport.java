@@ -68,6 +68,15 @@ public class DailyReport {
     @Column(name = "ai_suggestions", columnDefinition = "TEXT")
     private String aiSuggestions;  // JSON array of AI-generated priorities for next day
 
+    @Column(name = "ai_strengths", columnDefinition = "TEXT")
+    private String aiStrengths;  // JSON array of AI-identified strengths
+
+    @Column(name = "ai_improvements", columnDefinition = "TEXT")
+    private String aiImprovements;  // JSON array of AI-identified improvement areas
+
+    @Column(name = "ai_aura_boost_tips", columnDefinition = "TEXT")
+    private String aiAuraBoostTips;  // JSON array of AI tips to boost Aura score
+
     @Column(name = "ai_job_id")
     private UUID aiJobId;
 
@@ -183,6 +192,15 @@ public class DailyReport {
 
     public String getAiSuggestions() { return aiSuggestions; }
     public void setAiSuggestions(String aiSuggestions) { this.aiSuggestions = aiSuggestions; }
+
+    public String getAiStrengths() { return aiStrengths; }
+    public void setAiStrengths(String aiStrengths) { this.aiStrengths = aiStrengths; }
+
+    public String getAiImprovements() { return aiImprovements; }
+    public void setAiImprovements(String aiImprovements) { this.aiImprovements = aiImprovements; }
+
+    public String getAiAuraBoostTips() { return aiAuraBoostTips; }
+    public void setAiAuraBoostTips(String aiAuraBoostTips) { this.aiAuraBoostTips = aiAuraBoostTips; }
 
     public UUID getAiJobId() { return aiJobId; }
     public void setAiJobId(UUID aiJobId) { this.aiJobId = aiJobId; }

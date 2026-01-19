@@ -38,6 +38,9 @@ public class KpiAnalysisService {
     private TeamKpiRepository kpiRepository;
 
     @Autowired
+    private IndividualKpiRepository individualKpiRepository;
+
+    @Autowired
     private WeeklyKpiProgressRepository progressRepository;
 
     @Autowired
@@ -63,6 +66,9 @@ public class KpiAnalysisService {
 
     @Autowired
     private TeamReportDocumentService teamReportDocumentService;
+
+    @Autowired
+    private WeeklyKpiContextService weeklyKpiContextService;
 
     // ==================== KPI MANAGEMENT ====================
 
@@ -92,9 +98,15 @@ public class KpiAnalysisService {
         kpi.setQuarter(request.quarter);
         kpi.setYear(request.year);
         kpi.setIsActive(true);
-        kpi.setProgressSource(request.progressSource);
+        String progressSource = request.progressSource != null && !request.progressSource.isBlank()
+            ? request.progressSource
+            : "DAILY_REPORT_KPI_ALIGNMENT";
+        kpi.setProgressSource(progressSource);
         kpi.setProgressConfig(request.progressConfig);
-        kpi.setAutoProgressEnabled(request.autoProgressEnabled != null ? request.autoProgressEnabled : false);
+        boolean autoProgressEnabled = request.autoProgressEnabled != null
+            ? request.autoProgressEnabled
+            : (progressSource != null && !progressSource.isBlank());
+        kpi.setAutoProgressEnabled(autoProgressEnabled);
 
         return kpiRepository.save(kpi);
     }
@@ -128,7 +140,13 @@ public class KpiAnalysisService {
         if (request.targetValue != null) { kpi.setTargetValue(BigDecimal.valueOf(request.targetValue)); changed = true; }
         if (request.targetUnit != null) { kpi.setTargetUnit(request.targetUnit); changed = true; }
         if (request.isActive != null) { kpi.setIsActive(request.isActive); changed = true; }
-        if (request.progressSource != null) { kpi.setProgressSource(request.progressSource); changed = true; }
+        if (request.progressSource != null) {
+            kpi.setProgressSource(request.progressSource);
+            if (request.autoProgressEnabled == null) {
+                kpi.setAutoProgressEnabled(true);
+            }
+            changed = true;
+        }
         if (request.progressConfig != null) { kpi.setProgressConfig(request.progressConfig); changed = true; }
         if (request.autoProgressEnabled != null) { kpi.setAutoProgressEnabled(request.autoProgressEnabled); changed = true; }
 
@@ -328,6 +346,9 @@ public class KpiAnalysisService {
         // Call AI service with enhanced context (or strict fallback if no reports)
         String teamName = resolveTeamName(teamLead);
         GeminiAiService.AiAnalysisResult aiResult;
+        String contextText = weeklyKpiContextService.getOrBuildTeamContext(teamLeadId, weekNumber, year)
+            .map(WeeklyKpiContext::getContextText)
+            .orElse(null);
         if (memberFeedback.isEmpty()) {
             aiResult = new GeminiAiService.AiAnalysisResult();
             aiResult.fallback = true;
@@ -392,6 +413,7 @@ public class KpiAnalysisService {
                     kpiData,
                     memberFeedback,
                     teamReportText,
+                    contextText,
                     weekNumber,
                     year,
                     jobId
@@ -575,7 +597,27 @@ public class KpiAnalysisService {
         score.setDepartment(teamLead.getDepartment());
         score.setTeamName(teamName);
         score.setKpiAchievementScore(aiResult.kpiScore);
-        score.setOverallTeamScore(aiResult.kpiScore); // Can add more factors later
+
+        Double individualAvg = computeIndividualKpiAverage(teamLead.getDepartment(), quarter, year);
+        if (individualAvg != null) {
+            score.setIndividualAvgScore(BigDecimal.valueOf(individualAvg).setScale(2, RoundingMode.HALF_UP));
+        }
+
+        double kpiScore = aiResult.kpiScore != null ? aiResult.kpiScore.doubleValue() : 0.0;
+        double overallScore = kpiScore;
+        double individualWeight = 0.2;
+        double teamWeight = 0.8;
+        if (!aiResult.fallback && individualAvg != null) {
+            overallScore = (kpiScore * teamWeight) + (individualAvg * individualWeight);
+        }
+        score.setOverallTeamScore(BigDecimal.valueOf(overallScore).setScale(2, RoundingMode.HALF_UP));
+        Map<String, Object> breakdown = new LinkedHashMap<>();
+        breakdown.put("teamKpiScore", kpiScore);
+        breakdown.put("individualKpiAverage", individualAvg);
+        breakdown.put("teamWeight", teamWeight);
+        breakdown.put("individualWeight", individualWeight);
+        breakdown.put("fallback", aiResult.fallback);
+        score.setScoreBreakdown(breakdown);
         score.setAiSummary(aiResult.summary);
         score.setAiRequestId(aiResult.requestId);
         score.setPromptVersion(aiResult.promptVersion);
@@ -670,6 +712,29 @@ public class KpiAnalysisService {
         if (weekNumber <= 26) return "Q2";
         if (weekNumber <= 39) return "Q3";
         return "Q4";
+    }
+
+    private Double computeIndividualKpiAverage(String department, String quarter, Integer year) {
+        if (department == null || department.isBlank()) {
+            return null;
+        }
+        List<IndividualKpi> kpis = individualKpiRepository.findByDepartmentAndPeriod(department, quarter, year);
+        if (kpis.isEmpty()) {
+            return null;
+        }
+        double weightedSum = 0.0;
+        int totalWeight = 0;
+        for (IndividualKpi kpi : kpis) {
+            if (kpi.getAchievementPercentage() == null || kpi.getWeight() == null) {
+                continue;
+            }
+            weightedSum += kpi.getAchievementPercentage().doubleValue() * kpi.getWeight();
+            totalWeight += kpi.getWeight();
+        }
+        if (totalWeight == 0) {
+            return null;
+        }
+        return weightedSum / totalWeight;
     }
 
     public String getCurrentQuarter() {

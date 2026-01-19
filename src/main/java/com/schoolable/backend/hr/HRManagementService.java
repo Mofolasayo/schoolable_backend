@@ -36,6 +36,9 @@ public class HRManagementService {
     private TeamLeadRepository teamLeadRepository;
 
     @Autowired
+    private TeamRepository teamRepository;
+
+    @Autowired
     private AuditService auditService;
 
     // =====================================================
@@ -46,6 +49,7 @@ public class HRManagementService {
      * Get organizational structure by grade with employee counts.
      */
     public List<Map<String, Object>> getOrganizationalStructure() {
+        syncGradeAssignments();
         List<Map<String, Object>> structure = new ArrayList<>();
         
         // Define grades based on policy pyramid
@@ -78,6 +82,38 @@ public class HRManagementService {
         }
         
         return structure;
+    }
+
+    private void syncGradeAssignments() {
+        List<Profile> profiles = profileRepository.findAll();
+        if (profiles.isEmpty()) {
+            return;
+        }
+
+        for (Profile profile : profiles) {
+            boolean changed = false;
+            Integer jobLevel = profile.getJobLevel();
+            if (jobLevel != null) {
+                Optional<JobLevel> jobLevelOpt = jobLevelRepository.findByLevelNumber(jobLevel);
+                if (jobLevelOpt.isPresent()) {
+                    Integer desiredGrade = jobLevelOpt.get().getGrade();
+                    if (!Objects.equals(profile.getGrade(), desiredGrade)) {
+                        profile.setGrade(desiredGrade);
+                        changed = true;
+                    }
+                }
+            } else if (Boolean.TRUE.equals(profile.getIsTeamLead())) {
+                Integer grade = profile.getGrade();
+                if (grade == null || grade < 3) {
+                    profile.setGrade(3);
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                profileRepository.save(profile);
+            }
+        }
     }
 
     /**
@@ -131,6 +167,8 @@ public class HRManagementService {
             lead.put("currentCgpa", appointment.getCurrentCgpa());
             lead.put("perks", appointment.getPerks());
             lead.put("monthsAsLead", appointment.getMonthsAsTeamLead());
+            lead.put("requestStatus", employee.getTeamLeadRequestStatus());
+            lead.put("requestedAt", employee.getTeamLeadRequestedAt());
             
             result.add(lead);
         }
@@ -147,11 +185,28 @@ public class HRManagementService {
                 lead.put("status", "legacy");
                 lead.put("teamSize", 0);
                 lead.put("reviewCycles", 0);
+                lead.put("requestStatus", profile.getTeamLeadRequestStatus());
+                lead.put("requestedAt", profile.getTeamLeadRequestedAt());
                 result.add(lead);
             }
         }
         
         return result;
+    }
+
+    /**
+     * Get pending team lead requests.
+     */
+    public List<Map<String, Object>> getPendingTeamLeadRequests() {
+        return profileRepository.findByTeamLeadRequestStatus("pending")
+            .stream()
+            .map(profile -> {
+                Map<String, Object> dto = toEmployeeDto(profile);
+                dto.put("requestStatus", profile.getTeamLeadRequestStatus());
+                dto.put("requestedAt", profile.getTeamLeadRequestedAt());
+                return dto;
+            })
+            .collect(Collectors.toList());
     }
 
     /**
@@ -179,7 +234,10 @@ public class HRManagementService {
         appointment.setAppointedAt(OffsetDateTime.now());
         appointment.setStatus(TeamLeadAppointment.STATUS_ACTING);
         appointment.setDepartment(employee.getDepartment());
-        appointment.setTeamName(teamName);
+        String finalTeamName = teamName != null && !teamName.isBlank()
+            ? teamName
+            : (employee.getDepartment() != null ? employee.getDepartment() : "Team");
+        appointment.setTeamName(finalTeamName);
         appointment.setTeamSize(0);
         appointment.setPerks("[\"workspace\", \"data_allowance\"]"); // Default perks
         
@@ -187,12 +245,119 @@ public class HRManagementService {
         
         // Update profile
         employee.setIsTeamLead(true);
+        employee.setTeamLeadRequestStatus("approved");
         profileRepository.save(employee);
         
         // Audit log
         auditService.logCreate("TEAM_LEAD_APPOINTMENT", appointment.getId().toString(), appointedBy);
         
         return appointment;
+    }
+
+    /**
+     * Approve a pending team lead request and appoint as acting lead.
+     */
+    @Transactional
+    public TeamLeadAppointment approveTeamLeadRequest(UUID employeeId, String teamName, UUID approvedBy) {
+        Profile employee = profileRepository.findById(employeeId)
+            .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
+
+        if (!"pending".equalsIgnoreCase(employee.getTeamLeadRequestStatus())) {
+            throw new IllegalArgumentException("Team lead request is not pending");
+        }
+
+        TeamLeadAppointment appointment = appointTeamLead(
+            employeeId,
+            teamName != null && !teamName.isBlank() ? teamName : employee.getDepartment(),
+            approvedBy
+        );
+
+        employee.setTeamLeadRequestStatus("approved");
+        profileRepository.save(employee);
+
+        return appointment;
+    }
+
+    /**
+     * Reject a pending team lead request.
+     */
+    @Transactional
+    public void rejectTeamLeadRequest(UUID employeeId, UUID rejectedBy, String reason) {
+        Profile employee = profileRepository.findById(employeeId)
+            .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
+
+        employee.setTeamLeadRequestStatus("rejected");
+        profileRepository.save(employee);
+
+        auditService.logUpdate(
+            "TEAM_LEAD_REQUEST",
+            employeeId.toString(),
+            Map.of("status", "rejected", "reason", reason != null ? reason : ""),
+            rejectedBy
+        );
+    }
+
+    // =====================================================
+    // TEAMS
+    // =====================================================
+
+    /**
+     * Get all teams (registered teams plus departments already in use).
+     */
+    public List<Map<String, Object>> getTeams() {
+        Map<String, Team> managedTeams = teamRepository.findAllByOrderByNameAsc()
+            .stream()
+            .collect(Collectors.toMap(t -> t.getName().toLowerCase(Locale.ROOT), t -> t, (a, b) -> a));
+
+        List<String> departments = profileRepository.findAllDepartments();
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Team team : managedTeams.values()) {
+            result.add(toTeamDto(team, true));
+        }
+
+        for (String dept : departments) {
+            if (dept == null || dept.isBlank()) continue;
+            String key = dept.toLowerCase(Locale.ROOT);
+            if (!managedTeams.containsKey(key)) {
+                result.add(Map.of(
+                    "id", "department:" + dept,
+                    "name", dept,
+                    "description", "",
+                    "isActive", true,
+                    "memberCount", profileRepository.countByDepartment(dept),
+                    "managed", false
+                ));
+            }
+        }
+
+        result.sort(Comparator.comparing(t -> ((String) t.get("name")).toLowerCase(Locale.ROOT)));
+        return result;
+    }
+
+    /**
+     * Create a new team.
+     */
+    @Transactional
+    public Team createTeam(String name, String description, UUID createdBy) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Team name is required");
+        }
+
+        teamRepository.findByNameIgnoreCase(name)
+            .ifPresent(existing -> {
+                throw new IllegalArgumentException("Team already exists");
+            });
+
+        Team team = new Team();
+        team.setName(name.trim());
+        team.setDescription(description);
+        team.setIsActive(true);
+        team.setCreatedBy(createdBy);
+
+        Team saved = teamRepository.save(team);
+        auditService.logCreate("TEAM", saved.getId().toString(), createdBy);
+        return saved;
     }
 
     // =====================================================
@@ -213,8 +378,9 @@ public class HRManagementService {
     public Map<String, Object> getProbationStats() {
         Map<String, Object> stats = new HashMap<>();
         stats.put("onProbation", probationRepository.countActiveProbations());
-        stats.put("dueForConfirmation", probationRepository.findDueForConfirmation(
-            LocalDate.now(), LocalDate.now().plusWeeks(2)).size());
+        stats.put("dueForConfirmation", probationRepository.findActiveProbations().stream()
+            .filter(record -> !record.getCurrentEndDate().isAfter(LocalDate.now()))
+            .count());
         stats.put("atRisk", probationRepository.countAtRisk());
         stats.put("overdue", probationRepository.findOverdue(LocalDate.now()).size());
         return stats;
@@ -246,12 +412,43 @@ public class HRManagementService {
         if (employee != null) {
             employee.setProbationStatus("pending");
             employee.setHireDate(startDate);
+            employee.setConfirmationStatus("probation");
+            employee.setProbationEndDate(java.sql.Date.valueOf(record.getCurrentEndDate()));
             profileRepository.save(employee);
         }
         
         auditService.logCreate("PROBATION", record.getId().toString(), createdBy);
         
         return record;
+    }
+
+    /**
+     * Ensure new hires have an auto-created probation record.
+     */
+    @Transactional
+    public Optional<ProbationRecord> ensureProbationForNewHire(Profile employee, UUID createdBy, int probationMonths) {
+        if (employee == null || employee.getId() == null) {
+            return Optional.empty();
+        }
+        if ("admin".equalsIgnoreCase(employee.getRole())) {
+            return Optional.empty();
+        }
+        if (probationRepository.findByEmployeeId(employee.getId()).isPresent()) {
+            return Optional.empty();
+        }
+
+        LocalDate startDate = null;
+        if (employee.getHireDate() != null) {
+            startDate = employee.getHireDate().toLocalDate();
+        } else if (employee.getDateJoined() != null) {
+            startDate = employee.getDateJoined().toLocalDate();
+        }
+        if (startDate == null) {
+            startDate = LocalDate.now();
+        }
+
+        ProbationRecord record = createProbation(employee.getId(), startDate, probationMonths, null, createdBy);
+        return Optional.of(record);
     }
 
     /**
@@ -509,6 +706,8 @@ public class HRManagementService {
         dto.put("status", profile.getStatus());
         dto.put("employeeId", profile.getEmployeeId());
         dto.put("gender", profile.getGender());
+        dto.put("teamLeadRequestStatus", profile.getTeamLeadRequestStatus());
+        dto.put("teamLeadRequestedAt", profile.getTeamLeadRequestedAt());
         
         // Generate gender-based avatar URL
         String seed = profile.getEmployeeId() != null ? profile.getEmployeeId() : 
@@ -524,6 +723,18 @@ public class HRManagementService {
         }
         dto.put("avatar", avatarUrl);
         
+        return dto;
+    }
+
+    private Map<String, Object> toTeamDto(Team team, boolean managed) {
+        Map<String, Object> dto = new LinkedHashMap<>();
+        dto.put("id", team.getId());
+        dto.put("name", team.getName());
+        dto.put("description", team.getDescription() != null ? team.getDescription() : "");
+        dto.put("isActive", team.getIsActive());
+        dto.put("memberCount", profileRepository.countByDepartment(team.getName()));
+        dto.put("managed", managed);
+        dto.put("createdAt", team.getCreatedAt());
         return dto;
     }
 
@@ -548,6 +759,7 @@ public class HRManagementService {
         dto.put("daysRemaining", record.getDaysRemaining());
         dto.put("isOverdue", record.isOverdue());
         dto.put("isInGracePeriod", record.isInGracePeriod());
+        dto.put("isDueForConfirmation", !record.getCurrentEndDate().isAfter(LocalDate.now()));
         
         return dto;
     }
@@ -565,10 +777,14 @@ public class HRManagementService {
         dto.put("status", record.getStatus());
         dto.put("triggerReason", record.getTriggerReason());
         dto.put("triggerScore", record.getTriggerScore());
+        dto.put("placedOn", record.getStartDate());
         dto.put("daysRemaining", record.getDaysRemaining());
         dto.put("weeksRemaining", record.getWeeksRemaining());
         dto.put("progressPercentage", record.getProgressPercentage());
         dto.put("isOverdue", record.isOverdue());
+        dto.put("overdueDays", record.isOverdue()
+            ? java.time.temporal.ChronoUnit.DAYS.between(record.getEndDate(), LocalDate.now())
+            : 0);
         dto.put("goals", record.getGoals().stream().map(g -> Map.of(
             "id", g.getId(),
             "description", g.getGoalDescription(),

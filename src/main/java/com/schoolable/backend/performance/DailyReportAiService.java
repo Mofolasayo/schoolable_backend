@@ -105,15 +105,48 @@ public class DailyReportAiService {
         if (result.feedback != null) {
             report.setAiFeedback(result.feedback);
         }
-        if (result.kpiAlignmentScore != null) {
-            report.setKpiAlignmentScore(result.kpiAlignmentScore);
+        if (result.kpiAlignmentScore == null) {
+            result.kpiAlignmentScore = result.overallScore != null
+                ? result.overallScore
+                : java.math.BigDecimal.ZERO;
         }
+        report.setKpiAlignmentScore(result.kpiAlignmentScore);
         if (result.suggestionsForTomorrow != null && !result.suggestionsForTomorrow.isEmpty()) {
             try {
                 report.setAiSuggestions(objectMapper.writeValueAsString(result.suggestionsForTomorrow));
             } catch (Exception e) {
                 report.setAiSuggestions(null);
             }
+        }
+
+        if (result.strengths != null && !result.strengths.isEmpty()) {
+            try {
+                report.setAiStrengths(objectMapper.writeValueAsString(result.strengths));
+            } catch (Exception e) {
+                report.setAiStrengths(null);
+            }
+        } else {
+            report.setAiStrengths(null);
+        }
+
+        if (result.improvements != null && !result.improvements.isEmpty()) {
+            try {
+                report.setAiImprovements(objectMapper.writeValueAsString(result.improvements));
+            } catch (Exception e) {
+                report.setAiImprovements(null);
+            }
+        } else {
+            report.setAiImprovements(null);
+        }
+
+        if (result.auraBoostTips != null && !result.auraBoostTips.isEmpty()) {
+            try {
+                report.setAiAuraBoostTips(objectMapper.writeValueAsString(result.auraBoostTips));
+            } catch (Exception e) {
+                report.setAiAuraBoostTips(null);
+            }
+        } else {
+            report.setAiAuraBoostTips(null);
         }
 
         report.setAiGradedAt(OffsetDateTime.now());

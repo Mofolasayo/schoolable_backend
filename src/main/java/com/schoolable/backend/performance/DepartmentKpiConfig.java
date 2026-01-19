@@ -26,20 +26,24 @@ public class DepartmentKpiConfig {
         Map.of(
             // ================================================
             // TECHNICAL COMPETENCE (35% of Aura)
-            // Primary: Daily Reports + Tasks + Individual KPIs
+            // Primary: Daily Reports + KPI Alignment + Tasks + Individual KPIs
             // ================================================
             "technical", new PillarProfile(35, Map.of(
                 // AI-graded daily report score
-                "daily_report_score", new MetricConfig(35, "Daily Report Quality", "auto", "daily_reports",
+                "daily_report_score", new MetricConfig(30, "Daily Report Quality", "auto", "daily_reports",
                     "AI-graded score based on clarity, productivity, and KPI alignment", 100.0),
                 
                 // Combined task metrics
-                "task_performance", new MetricConfig(30, "Task Performance", "auto", "tasks",
+                "task_performance", new MetricConfig(25, "Task Performance", "auto", "tasks",
                     "Combined: completion rate + on-time delivery + quality rating", 100.0),
                 
                 // Individual KPI achievement (from IndividualKpi entity)
                 "kpi_achievement", new MetricConfig(20, "Individual KPI Achievement", "auto", "individual_kpis",
                     "Weighted average of individual KPI achievement percentages", 100.0),
+
+                // AI-derived KPI alignment from daily reports
+                "kpi_alignment", new MetricConfig(10, "KPI Alignment", "auto", "daily_reports",
+                    "Average KPI alignment score from daily reports", 100.0),
                 
                 // TL Technical Rating
                 "tl_technical_rating", new MetricConfig(15, "Technical Rating", "team_lead", "weekly_report",

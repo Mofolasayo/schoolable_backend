@@ -20,6 +20,7 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     List<Profile> findByJobLevelOrderByFullNameAsc(Integer jobLevel);
     List<Profile> findByIsTeamLeadTrue();
     List<Profile> findByProbationStatus(String probationStatus);
+    List<Profile> findByTeamLeadRequestStatus(String teamLeadRequestStatus);
     
     @Query("SELECT p FROM Profile p WHERE p.status = :status AND p.probationStatus = :probationStatus")
     List<Profile> findByStatusAndProbationStatus(String status, String probationStatus);
@@ -32,9 +33,12 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     
     @Query("SELECT COUNT(p) FROM Profile p WHERE p.grade = :grade")
     long countByGrade(Integer grade);
-    
+
     @Query("SELECT COUNT(p) FROM Profile p WHERE p.jobLevel = :level")
     long countByJobLevel(Integer level);
+
+    @Query("SELECT COUNT(p) FROM Profile p WHERE p.department = :department")
+    long countByDepartment(String department);
 
     // Team Lead queries
     @Query("SELECT COUNT(p) FROM Profile p WHERE p.teamLeadId = :teamLeadId")
@@ -51,4 +55,3 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     // Find by department and status
     List<Profile> findByDepartmentAndStatus(String department, String status);
 }
-

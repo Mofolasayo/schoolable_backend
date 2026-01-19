@@ -43,6 +43,9 @@ public class AuraDashboardService {
     @Autowired
     private AnnouncementReadRepository announcementReadRepository;
 
+    @Autowired
+    private AutoAuraCalculationService autoAuraService;
+
     /**
      * Get the full Aura dashboard data for an employee.
      * This is the main endpoint for the mobile app.
@@ -51,51 +54,37 @@ public class AuraDashboardService {
         Profile profile = profileRepository.findById(employeeId)
                 .orElseThrow(() -> new RuntimeException("Employee not found"));
 
+        Map<String, Object> autoAura = autoAuraService.calculateEmployeeScore(profile);
+        if (autoAura.containsKey("error")) {
+            throw new RuntimeException(autoAura.get("error").toString());
+        }
+
         AuraDashboardDto.EmployeeAuraResponse response = new AuraDashboardDto.EmployeeAuraResponse();
         response.setEmployeeId(employeeId.toString());
         response.setEmployeeName(profile.getFullName());
         response.setDepartment(profile.getDepartment());
         response.setRole(profile.getRole());
 
-        // Get current quarter info
-        LocalDate now = LocalDate.now();
-        int currentQuarter = (now.getMonthValue() - 1) / 3 + 1;
-        response.setCurrentQuarter("Q" + currentQuarter);
-        response.setCurrentYear(now.getYear());
+        String quarter = stringValue(autoAura.get("quarter"));
+        Integer year = intValue(autoAura.get("year"));
+        if (quarter != null) {
+            response.setCurrentQuarter(quarter);
+        }
+        if (year != null) {
+            response.setCurrentYear(year);
+        }
 
-        // Calculate each pillar (4 pillars × 25% each)
-        AuraDashboardDto.PillarScores pillars = new AuraDashboardDto.PillarScores();
+        Double auraScore = doubleValue(autoAura.get("auraScore"));
+        Double qgpa = doubleValue(autoAura.get("qgpa"));
+        response.setAuraScore(auraScore != null ? Math.round(auraScore * 100.0) / 100.0 : null);
+        response.setQgpa(qgpa != null ? Math.round(qgpa * 100.0) / 100.0 : null);
+        response.setGrade(stringValue(autoAura.get("grade")));
 
-        // Technical Pillar (25% - Auto-calculated from tasks)
-        AuraDashboardDto.PillarDetail technical = calculateTechnicalPillar(employeeId);
-        pillars.setTechnical(technical);
-
-        // Behavioral Pillar (25% - Mixed: Team Lead + Auto)
-        AuraDashboardDto.PillarDetail behavioral = calculateBehavioralPillar(employeeId);
-        pillars.setBehavioral(behavioral);
-
-        // Culture Fit Pillar (25% - Mixed: Team Lead + Auto + Collaboration metrics)
-        AuraDashboardDto.PillarDetail cultureFit = calculateCultureFitPillar(employeeId);
-        pillars.setCultureFit(cultureFit);
-
-        // Growth & Learning Pillar (25% - Uses training records)
-        AuraDashboardDto.PillarDetail growth = calculateGrowthPillar(employeeId);
-        pillars.setGrowthLearning(growth);
-
+        AuraDashboardDto.PillarScores pillars = buildPillarsFromAuto(profile, autoAura);
         response.setPillars(pillars);
 
-        // Calculate overall Aura score (4 pillars × 25% each = 100%)
-        double auraScore = 
-            technical.getContribution() +
-            behavioral.getContribution() +
-            cultureFit.getContribution() +
-            growth.getContribution();
-        
-        response.setAuraScore(Math.round(auraScore * 100.0) / 100.0);
-        response.setQgpa(Math.round((auraScore / 20) * 100.0) / 100.0);
-        response.setGrade(calculateGrade(auraScore));
-
-        // Get weeks rated count
+        LocalDate now = LocalDate.now();
+        int currentQuarter = (now.getMonthValue() - 1) / 3 + 1;
         int weeksRated = getWeeksRatedThisQuarter(employeeId, currentQuarter, now.getYear());
         response.setWeeksRatedThisQuarter(weeksRated);
 
@@ -567,6 +556,10 @@ public class AuraDashboardService {
             try {
                 UUID employeeId = profile.getId();
                 Map<String, Object> employeeData = new HashMap<>();
+                Map<String, Object> autoAura = autoAuraService.calculateEmployeeScore(profile);
+                if (autoAura.containsKey("error")) {
+                    continue;
+                }
 
                 // Basic profile info
                 employeeData.put("id", employeeId.toString());
@@ -576,29 +569,20 @@ public class AuraDashboardService {
                 employeeData.put("department", profile.getDepartment());
                 employeeData.put("status", profile.getStatus() != null ? profile.getStatus() : "active");
 
-                // Calculate pillar scores
-                AuraDashboardDto.PillarDetail technical = calculateTechnicalPillar(employeeId);
-                AuraDashboardDto.PillarDetail behavioral = calculateBehavioralPillar(employeeId);
-                AuraDashboardDto.PillarDetail cultureFit = calculateCultureFitPillar(employeeId);
-                AuraDashboardDto.PillarDetail growth = calculateGrowthPillar(employeeId);
+                Map<String, Object> pillars = mapValue(autoAura.get("pillars"));
+                Map<String, Object> technical = mapValue(pillars != null ? pillars.get("technical") : null);
+                Map<String, Object> behavioral = mapValue(pillars != null ? pillars.get("behavioral") : null);
+                Map<String, Object> cultureFit = mapValue(pillars != null ? pillars.get("culture_fit") : null);
+                Map<String, Object> growth = mapValue(pillars != null ? pillars.get("growth") : null);
 
-                // Convert scores to 0-5 scale (from 0-100)
-                employeeData.put("technical_score", Math.round(technical.getScore() / 20.0 * 100.0) / 100.0);
-                employeeData.put("behavioral_score", Math.round(behavioral.getScore() / 20.0 * 100.0) / 100.0);
-                employeeData.put("culture_score", Math.round(cultureFit.getScore() / 20.0 * 100.0) / 100.0);
-                employeeData.put("growth_score", Math.round(growth.getScore() / 20.0 * 100.0) / 100.0);
+                employeeData.put("technical_score", toFiveScale(doubleValue(technical != null ? technical.get("score") : null)));
+                employeeData.put("behavioral_score", toFiveScale(doubleValue(behavioral != null ? behavioral.get("score") : null)));
+                employeeData.put("culture_score", toFiveScale(doubleValue(cultureFit != null ? cultureFit.get("score") : null)));
+                employeeData.put("growth_score", toFiveScale(doubleValue(growth != null ? growth.get("score") : null)));
 
-                // Calculate overall Aura score (4 pillars × 25% each)
-                double auraScore100 = 
-                    technical.getContribution() +
-                    behavioral.getContribution() +
-                    cultureFit.getContribution() +
-                    growth.getContribution();
-                
-                // Convert to 0-5 scale
-                double auraScore5 = auraScore100 / 20.0;
-                employeeData.put("aura_score", Math.round(auraScore5 * 100.0) / 100.0);
-                employeeData.put("grade", calculateGrade(auraScore100));
+                Double auraScore100 = doubleValue(autoAura.get("auraScore"));
+                employeeData.put("aura_score", toFiveScale(auraScore100));
+                employeeData.put("grade", stringValue(autoAura.get("grade")));
 
                 // Get certificates count (approved)
                 String quarter = getCurrentQuarter();
@@ -615,5 +599,93 @@ public class AuraDashboardService {
 
         return result;
     }
-}
 
+    private AuraDashboardDto.PillarScores buildPillarsFromAuto(Profile profile, Map<String, Object> autoAura) {
+        AuraDashboardDto.PillarScores pillars = new AuraDashboardDto.PillarScores();
+        DepartmentKpiConfig.DepartmentProfile profileConfig =
+            DepartmentKpiConfig.getProfileForDepartment(profile.getDepartment());
+
+        Map<String, Object> pillarMap = mapValue(autoAura.get("pillars"));
+        pillars.setTechnical(buildPillarDetail(pillarMap, "technical", profileConfig));
+        pillars.setBehavioral(buildPillarDetail(pillarMap, "behavioral", profileConfig));
+        pillars.setCultureFit(buildPillarDetail(pillarMap, "culture_fit", profileConfig));
+        pillars.setGrowthLearning(buildPillarDetail(pillarMap, "growth", profileConfig));
+        return pillars;
+    }
+
+    private AuraDashboardDto.PillarDetail buildPillarDetail(
+        Map<String, Object> pillarMap,
+        String key,
+        DepartmentKpiConfig.DepartmentProfile profileConfig
+    ) {
+        Map<String, Object> detail = pillarMap != null ? mapValue(pillarMap.get(key)) : null;
+        DepartmentKpiConfig.PillarProfile pillarConfig = profileConfig.pillars.get(key);
+        double weight = pillarConfig != null ? pillarConfig.weight : 0.0;
+
+        AuraDashboardDto.PillarDetail pillarDetail = new AuraDashboardDto.PillarDetail();
+        pillarDetail.setName(detail != null ? stringValue(detail.get("name")) : formatPillarName(key));
+        Double score = doubleValue(detail != null ? detail.get("score") : null);
+        pillarDetail.setScore(score != null ? Math.round(score * 10.0) / 10.0 : 0.0);
+        pillarDetail.setWeight(weight);
+        pillarDetail.setContribution(score != null ? Math.round(score * (weight / 100.0) * 100.0) / 100.0 : 0.0);
+        pillarDetail.setDataSource(detail != null ? stringValue(detail.get("dataSource")) : "auto");
+        return pillarDetail;
+    }
+
+    private String formatPillarName(String key) {
+        if (key == null) return "Pillar";
+        return switch (key) {
+            case "culture_fit" -> "Culture Fit";
+            case "growth" -> "Growth & Learning";
+            default -> Character.toUpperCase(key.charAt(0)) + key.substring(1);
+        };
+    }
+
+    private Double toFiveScale(Double score) {
+        if (score == null) return null;
+        return Math.round((score / 20.0) * 100.0) / 100.0;
+    }
+
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> casted = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() != null) {
+                    casted.put(entry.getKey().toString(), entry.getValue());
+                }
+            }
+            return casted;
+        }
+        return null;
+    }
+
+    private Double doubleValue(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Integer intValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) return null;
+        try {
+            return Integer.parseInt(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value != null ? value.toString() : null;
+    }
+}

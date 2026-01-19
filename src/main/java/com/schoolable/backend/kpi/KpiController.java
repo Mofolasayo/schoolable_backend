@@ -670,12 +670,15 @@ public class KpiController {
         formatted.put("quarter", score.getQuarter());
         formatted.put("year", score.getYear());
         formatted.put("kpiAchievementScore", score.getKpiAchievementScore());
+        formatted.put("individualAvgScore", score.getIndividualAvgScore());
         formatted.put("overallTeamScore", score.getOverallTeamScore());
         formatted.put("grade", score.getGrade());
         formatted.put("aiSummary", score.getAiSummary());
         formatted.put("promptVersion", score.getPromptVersion());
         formatted.put("modelUsed", score.getModelUsed());
         formatted.put("aiRequestId", score.getAiRequestId());
+        formatted.put("scoreBreakdown", score.getScoreBreakdown());
+        formatted.put("createdAt", score.getCreatedAt());
         return formatted;
     }
 }

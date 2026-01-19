@@ -337,6 +337,7 @@ public class TaskController {
         if (!canUpdateTaskProgress(userId, auth, task)) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
+        String previousStatus = task.getStatus();
         if (req.title() != null) task.setTitle(req.title());
         if (req.description() != null) task.setDescription(req.description());
         List<UUID> assigneeIdsToSync = null;
@@ -361,6 +362,7 @@ public class TaskController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Task is blocked by another task"));
             }
             task.setStatus(nextStatus);
+            updateCompletionTimestamp(task, previousStatus, nextStatus);
         }
         if (req.dueDate() != null) task.setDueDate(OffsetDateTime.parse(req.dueDate()));
         if (req.dueTime() != null) task.setDueTime(java.time.LocalTime.parse(req.dueTime()));
@@ -420,6 +422,7 @@ public class TaskController {
             return ResponseEntity.badRequest().body(Map.of("error", "Task is blocked by another task"));
         }
         task.setStatus(nextStatus);
+        updateCompletionTimestamp(task, oldStatus, nextStatus);
         if (req.progress() != null) {
             task.setProgress(req.progress());
         } else {
@@ -846,6 +849,7 @@ public class TaskController {
         response.put("created_by", task.getCreatedBy());
         response.put("created_at", task.getCreatedAt());
         response.put("updated_at", task.getUpdatedAt());
+        response.put("completed_at", task.getCompletedAt());
         response.put("blocked_by_id", task.getBlockedById());
         response.put("is_blocked", task.isBlocked());
         response.put("recurring_template_id", task.getRecurringTemplateId());
@@ -953,6 +957,21 @@ public class TaskController {
             case "CANCELLED", "CANCELED" -> Task.TaskStatus.CANCELLED.name();
             default -> normalized;
         };
+    }
+
+    private void updateCompletionTimestamp(Task task, String previousStatus, String nextStatus) {
+        String normalizedPrev = normalizeStatus(previousStatus);
+        String normalizedNext = normalizeStatus(nextStatus);
+        boolean wasDone = Task.TaskStatus.DONE.name().equals(normalizedPrev);
+        boolean isDone = Task.TaskStatus.DONE.name().equals(normalizedNext);
+
+        if (isDone) {
+            if (!wasDone || task.getCompletedAt() == null) {
+                task.setCompletedAt(OffsetDateTime.now());
+            }
+        } else if (wasDone) {
+            task.setCompletedAt(null);
+        }
     }
 
     private boolean isValidTransition(String currentStatus, String nextStatus) {

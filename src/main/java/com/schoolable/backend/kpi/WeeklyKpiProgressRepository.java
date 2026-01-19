@@ -18,6 +18,8 @@ public interface WeeklyKpiProgressRepository extends JpaRepository<WeeklyKpiProg
     // Find all progress for a KPI
     List<WeeklyKpiProgress> findByKpiIdOrderByWeekNumberDesc(UUID kpiId);
 
+    List<WeeklyKpiProgress> findByKpiIdAndYearOrderByWeekNumberDesc(UUID kpiId, Integer year);
+
     // Find all progress for a week
     List<WeeklyKpiProgress> findByReportedByAndWeekNumberAndYear(UUID reportedBy, Integer weekNumber, Integer year);
 

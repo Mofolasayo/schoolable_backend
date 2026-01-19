@@ -103,7 +103,7 @@ public interface TaskRepository extends JpaRepository<Task, Long>, JpaSpecificat
     """)
     List<Task> findCompletedTasksAfter(@Param("assigneeId") UUID assigneeId, @Param("after") OffsetDateTime after);
 
-    @Query("SELECT COUNT(t) FROM Task t WHERE t.organization = :department AND t.status IN :statuses AND t.updatedAt BETWEEN :start AND :end")
+    @Query("SELECT COUNT(t) FROM Task t WHERE t.organization = :department AND t.status IN :statuses AND COALESCE(t.completedAt, t.updatedAt) BETWEEN :start AND :end")
     long countByDepartmentStatusAndUpdatedAtBetween(@Param("department") String department, @Param("statuses") List<String> statuses, @Param("start") OffsetDateTime start, @Param("end") OffsetDateTime end);
 
     @Query("""
@@ -111,7 +111,7 @@ public interface TaskRepository extends JpaRepository<Task, Long>, JpaSpecificat
         LEFT JOIN TaskAssignee ta ON ta.taskId = t.id AND ta.isActive = true
         WHERE (ta.userId = :assigneeId OR t.assigneeId = :assigneeId)
         AND t.status IN :statuses
-        AND t.updatedAt BETWEEN :start AND :end
+        AND COALESCE(t.completedAt, t.updatedAt) BETWEEN :start AND :end
     """)
     long countByAssigneeStatusAndUpdatedAtBetween(@Param("assigneeId") UUID assigneeId, @Param("statuses") List<String> statuses, @Param("start") OffsetDateTime start, @Param("end") OffsetDateTime end);
 }

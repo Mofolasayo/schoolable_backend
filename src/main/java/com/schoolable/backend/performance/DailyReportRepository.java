@@ -70,6 +70,17 @@ public interface DailyReportRepository extends JpaRepository<DailyReport, Long> 
         @Param("endDate") LocalDate endDate
     );
 
+    /**
+     * Get average KPI alignment score for an employee in a date range
+     */
+    @Query("SELECT AVG(r.kpiAlignmentScore) FROM DailyReport r WHERE r.employeeId = :employeeId " +
+           "AND r.reportDate BETWEEN :startDate AND :endDate AND r.kpiAlignmentScore IS NOT NULL")
+    Double getAverageKpiAlignmentScore(
+        @Param("employeeId") UUID employeeId,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
     @Query("SELECT COUNT(r) FROM DailyReport r, com.schoolable.backend.profile.Profile p " +
            "WHERE r.employeeId = p.id AND p.department = :department " +
            "AND r.reportDate BETWEEN :startDate AND :endDate")
@@ -83,6 +94,15 @@ public interface DailyReportRepository extends JpaRepository<DailyReport, Long> 
            "WHERE r.employeeId = p.id AND p.department = :department " +
            "AND r.reportDate BETWEEN :startDate AND :endDate AND r.aiScore IS NOT NULL")
     Double getAverageAiScoreForDepartment(
+        @Param("department") String department,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
+    @Query("SELECT AVG(r.kpiAlignmentScore) FROM DailyReport r, com.schoolable.backend.profile.Profile p " +
+           "WHERE r.employeeId = p.id AND p.department = :department " +
+           "AND r.reportDate BETWEEN :startDate AND :endDate AND r.kpiAlignmentScore IS NOT NULL")
+    Double getAverageKpiAlignmentScoreForDepartment(
         @Param("department") String department,
         @Param("startDate") LocalDate startDate,
         @Param("endDate") LocalDate endDate

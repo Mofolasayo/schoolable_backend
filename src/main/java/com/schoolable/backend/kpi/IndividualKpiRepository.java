@@ -58,6 +58,12 @@ public interface IndividualKpiRepository extends JpaRepository<IndividualKpi, UU
         @Param("year") Integer year
     );
 
+    @Query("SELECT k FROM IndividualKpi k WHERE k.quarter = :quarter AND k.year = :year AND k.isActive = true")
+    List<IndividualKpi> findByQuarterAndYearAndIsActiveTrue(
+        @Param("quarter") String quarter,
+        @Param("year") Integer year
+    );
+
     /**
      * Calculate average achievement for an employee
      */

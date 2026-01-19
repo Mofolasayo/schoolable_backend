@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.WeekFields;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -42,6 +43,12 @@ public class PersonalInsightsService {
 
     @Autowired
     private ProfileRepository profileRepository;
+
+    @Autowired
+    private IndividualKpiRepository individualKpiRepository;
+
+    @Autowired
+    private WeeklyKpiContextService weeklyKpiContextService;
 
     @Autowired
     private com.schoolable.backend.announcement.AnnouncementReadRepository announcementReadRepository;
@@ -171,6 +178,30 @@ public class PersonalInsightsService {
         long quarterCerts = trainingRepository.countApprovedInQuarter(employeeId, currentQuarter, currentYear);
         data.put("certificatesThisQuarter", quarterCerts);
 
+        // Individual KPI progress
+        List<IndividualKpi> kpis = individualKpiRepository.findActiveByEmployeeAndPeriod(employeeId, currentQuarter, currentYear);
+        List<Map<String, Object>> kpiItems = new ArrayList<>();
+        double totalWeight = 0;
+        double weightedAchievement = 0;
+        for (IndividualKpi kpi : kpis) {
+            double achievement = resolveAchievement(kpi);
+            int weight = kpi.getWeight() != null ? kpi.getWeight() : 0;
+            totalWeight += weight;
+            weightedAchievement += achievement * weight;
+
+            Map<String, Object> item = new HashMap<>();
+            item.put("name", kpi.getName());
+            item.put("target", kpi.getTargetValue());
+            item.put("current", kpi.getCurrentValue());
+            item.put("unit", kpi.getTargetUnit());
+            item.put("weight", weight);
+            item.put("achievement", round1(achievement));
+            kpiItems.add(item);
+        }
+        double weightedKpiAchievement = totalWeight > 0 ? weightedAchievement / totalWeight : 0;
+        data.put("individualKpis", kpiItems);
+        data.put("kpiWeightedAchievement", round1(weightedKpiAchievement));
+
         // RICH CONTEXT: Announcements
         long totalAnnouncements = announcementReadRepository.countTotalAnnouncementsAfter(quarterStartTime);
         long readAnnouncements = announcementReadRepository.countByUserIdAndReadAtAfter(employeeId, quarterStartTime);
@@ -193,6 +224,11 @@ public class PersonalInsightsService {
             }
         }
         data.put("managerFeedback", managerFeedback);
+
+        int weekNumber = now.get(WeekFields.of(Locale.getDefault()).weekOfYear());
+        weeklyKpiContextService.getOrBuildEmployeeContext(employeeId, weekNumber, currentYear)
+            .map(WeeklyKpiContext::getContextText)
+            .ifPresent(summary -> data.put("weeklyContextSummary", summary));
 
         // Peer Feedback (NEW) - Get feedback comments for qualitative analysis
         try {
@@ -260,6 +296,10 @@ public class PersonalInsightsService {
             - Attendance: %d days (%.1f%% punctuality)
             - Certificates: %d
             - Announcement Engagement: Read %d of %d announcements
+
+            KPI PROGRESS:
+            - Weighted KPI achievement: %.1f%%
+            - KPIs: %s
             
             TREND ANALYSIS (Vs Last Quarter):
             - Completion Rate Change: %.1f%% (Prev: %.1f%% -> Curr: %.1f%%)
@@ -273,6 +313,9 @@ public class PersonalInsightsService {
             - Pending Tasks: %s
             
             MANAGER FEEDBACK (Weekly Reports):
+            %s
+
+            WEEKLY CONTEXT SNAPSHOT:
             %s
             
             PEER FEEDBACK:
@@ -310,6 +353,8 @@ public class PersonalInsightsService {
             (long) data.get("certificatesThisQuarter"),
             (long) data.get("readAnnouncements"),
             (long) data.get("totalAnnouncements"),
+            data.getOrDefault("kpiWeightedAchievement", 0),
+            data.get("individualKpis") != null ? data.get("individualKpis").toString() : "None",
             (double) data.get("completionTrend"),
             (double) data.get("prevCompletionRate"),
             (double) data.get("completionRate"),
@@ -318,6 +363,7 @@ public class PersonalInsightsService {
             data.get("recentCompletedTasks"),
             data.get("pendingTasks"),
             data.get("managerFeedback"),
+            data.getOrDefault("weeklyContextSummary", "No weekly context snapshot available."),
             data.get("feedbackComments") != null ? data.get("feedbackComments").toString() : "None",
             data.get("strengths"),
             data.get("improvements")
@@ -406,5 +452,19 @@ public class PersonalInsightsService {
         if (month <= 6) return "Q2";
         if (month <= 9) return "Q3";
         return "Q4";
+    }
+
+    private double resolveAchievement(IndividualKpi kpi) {
+        if (kpi.getAchievementPercentage() != null) {
+            return kpi.getAchievementPercentage().doubleValue();
+        }
+        if (kpi.getCurrentValue() != null && kpi.getTargetValue() != null && kpi.getTargetValue().doubleValue() > 0) {
+            return (kpi.getCurrentValue().doubleValue() / kpi.getTargetValue().doubleValue()) * 100;
+        }
+        return 0.0;
+    }
+
+    private double round1(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 }

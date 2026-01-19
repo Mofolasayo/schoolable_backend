@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.WeekFields;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -59,7 +60,10 @@ public class KpiProgressIngestionService {
         OffsetDateTime start = weekStart.atStartOfDay().atOffset(ZoneOffset.UTC);
         OffsetDateTime end = weekEnd.atTime(LocalTime.MAX).atOffset(ZoneOffset.UTC);
 
-        List<TeamKpi> teamKpis = teamKpiRepository.findByAutoProgressEnabledTrueAndQuarterAndYear(quarter, year);
+        List<TeamKpi> teamKpis = teamKpiRepository.findAllActiveByQuarterAndYear(quarter, year)
+            .stream()
+            .filter(kpi -> isAutoProgressEligible(kpi.getProgressSource()))
+            .toList();
         for (TeamKpi kpi : teamKpis) {
             Double achieved = computeTeamAchieved(kpi, weekStart, weekEnd, start, end);
             if (achieved == null) continue;
@@ -69,12 +73,16 @@ public class KpiProgressIngestionService {
             teamKpiRepository.save(kpi);
         }
 
-        List<IndividualKpi> individualKpis = individualKpiRepository.findByAutoProgressEnabledTrueAndQuarterAndYear(quarter, year);
+        List<IndividualKpi> individualKpis = individualKpiRepository.findByQuarterAndYearAndIsActiveTrue(quarter, year)
+            .stream()
+            .filter(kpi -> isAutoProgressEligible(kpi.getProgressSource()))
+            .toList();
         for (IndividualKpi kpi : individualKpis) {
             Double achieved = computeIndividualAchieved(kpi, weekStart, weekEnd, start, end);
             if (achieved == null) continue;
 
             upsertWeeklyProgress(kpi.getId(), kpi.getTargetValue(), achieved, weekNumber, year, kpi.getSetById());
+            updateIndividualCurrentValue(kpi, year);
             kpi.setLastProgressSyncAt(OffsetDateTime.now());
             individualKpiRepository.save(kpi);
         }
@@ -93,6 +101,10 @@ public class KpiProgressIngestionService {
             }
             case "DAILY_REPORT_SCORE_AVG" -> {
                 Double avg = dailyReportRepository.getAverageAiScoreForDepartment(kpi.getDepartment(), startDate, endDate);
+                yield avg != null ? avg : 0.0;
+            }
+            case "DAILY_REPORT_KPI_ALIGNMENT", "KPI_ALIGNMENT" -> {
+                Double avg = dailyReportRepository.getAverageKpiAlignmentScoreForDepartment(kpi.getDepartment(), startDate, endDate);
                 yield avg != null ? avg : 0.0;
             }
             default -> null;
@@ -114,8 +126,16 @@ public class KpiProgressIngestionService {
                 Double avg = dailyReportRepository.getAverageAiScore(kpi.getEmployeeId(), startDate, endDate);
                 yield avg != null ? avg : 0.0;
             }
+            case "DAILY_REPORT_KPI_ALIGNMENT", "KPI_ALIGNMENT" -> {
+                Double avg = dailyReportRepository.getAverageKpiAlignmentScore(kpi.getEmployeeId(), startDate, endDate);
+                yield avg != null ? avg : 0.0;
+            }
             default -> null;
         };
+    }
+
+    private boolean isAutoProgressEligible(String progressSource) {
+        return progressSource != null && !progressSource.isBlank();
     }
 
     private void upsertWeeklyProgress(UUID kpiId, BigDecimal targetValue, Double achieved, Integer weekNumber, Integer year, UUID reportedBy) {
@@ -139,6 +159,35 @@ public class KpiProgressIngestionService {
         progress.setSource("auto");
         progress.setIngestedAt(OffsetDateTime.now());
         progressRepository.save(progress);
+    }
+
+    private void updateIndividualCurrentValue(IndividualKpi kpi, Integer year) {
+        String progressSource = kpi.getProgressSource();
+        if (!isAutoProgressEligible(progressSource)) {
+            return;
+        }
+
+        Double value = null;
+        if ("DAILY_REPORT_SCORE_AVG".equalsIgnoreCase(progressSource)
+            || "DAILY_REPORT_KPI_ALIGNMENT".equalsIgnoreCase(progressSource)
+            || "KPI_ALIGNMENT".equalsIgnoreCase(progressSource)) {
+            List<WeeklyKpiProgress> progress = progressRepository
+                .findByKpiIdAndYearOrderByWeekNumberDesc(kpi.getId(), year);
+            if (!progress.isEmpty()) {
+                value = progress.stream()
+                    .map(p -> p.getAchievedValue() != null ? p.getAchievedValue().doubleValue() : null)
+                    .filter(Objects::nonNull)
+                    .mapToDouble(Double::doubleValue)
+                    .average()
+                    .orElse(0.0);
+            }
+        } else {
+            value = progressRepository.sumAchievedValueByKpiIdAndYear(kpi.getId(), year);
+        }
+
+        if (value != null) {
+            kpi.setCurrentValue(BigDecimal.valueOf(value));
+        }
     }
 
     private String getQuarterForWeek(int weekNumber) {
