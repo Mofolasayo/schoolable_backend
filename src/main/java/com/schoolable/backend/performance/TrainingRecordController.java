@@ -184,6 +184,7 @@ public class TrainingRecordController {
                 item.put("name", r.getTrainingName());
                 item.put("quarter", r.getQuarter());
                 item.put("year", r.getYear());
+                item.put("status", r.getStatus());
                 item.put("certificateUrl", r.getCertificateUrl());
                 item.put("createdAt", r.getCreatedAt());
                 result.add(item);

@@ -283,6 +283,7 @@ public class KpiAnalysisService {
             );
             kpiData.add(data);
         }
+        BigDecimal kpiProgressScore = calculateWeightedProgressScore(kpiData);
 
         // NEW: Collect team member feedback data from weekly reports for personalized insights
         List<GeminiAiService.TeamMemberFeedback> memberFeedback = new ArrayList<>();
@@ -372,6 +373,7 @@ public class KpiAnalysisService {
                 "No weekly reports submitted; team score set to 0."
             ));
             aiResult.rawResponse = Map.of("error", "NO_WEEKLY_REPORTS");
+            attachScoreBreakdown(aiResult, kpiProgressScore, false, "NO_WEEKLY_REPORTS");
         } else {
             String teamReportUrl = memberFeedback.stream()
                 .map(feedback -> feedback.teamReportDocument)
@@ -384,11 +386,12 @@ public class KpiAnalysisService {
                 teamReportText = teamReportDocumentService.extractReportText(teamReportUrl).orElse(null);
             }
 
-            if (teamReportUrl != null && (teamReportText == null || teamReportText.isBlank())) {
+            boolean reportAvailable = teamReportText != null && !teamReportText.isBlank();
+            if (teamReportUrl != null && !reportAvailable) {
                 aiResult = new GeminiAiService.AiAnalysisResult();
                 aiResult.fallback = true;
-                aiResult.kpiScore = BigDecimal.ZERO;
-                aiResult.summary = "Team report document could not be accessed. Ensure the report is uploaded and publicly deliverable.";
+                aiResult.kpiScore = kpiProgressScore;
+                aiResult.summary = "Team report document could not be accessed. Showing KPI progress baseline only.";
                 aiResult.insights = Map.of(
                     "topPerforming", List.of(),
                     "needsAttention", List.of("Team report document could not be accessed."),
@@ -400,12 +403,13 @@ public class KpiAnalysisService {
                     "Generate insights again after the document is accessible."
                 ));
                 aiResult.riskAlerts = Map.of("items", List.of(
-                    "Weekly report document unavailable; team score set to 0."
+                    "Weekly report document unavailable; AI insights not generated."
                 ));
                 Map<String, Object> rawResponse = new HashMap<>();
                 rawResponse.put("error", "REPORT_DOCUMENT_UNAVAILABLE");
                 rawResponse.put("teamReportUrl", teamReportUrl);
                 aiResult.rawResponse = rawResponse;
+                attachScoreBreakdown(aiResult, kpiProgressScore, false, "REPORT_BLOCKED");
             } else {
                 aiResult = geminiService.analyzeWeeklyProgressWithFeedback(
                     teamName,
@@ -418,6 +422,7 @@ public class KpiAnalysisService {
                     year,
                     jobId
                 );
+                attachScoreBreakdown(aiResult, kpiProgressScore, reportAvailable, reportAvailable ? "AI_ANALYSIS" : "AI_NO_REPORT");
             }
         }
 
@@ -705,6 +710,50 @@ public class KpiAnalysisService {
         }
 
         return teamLead.getFullName() + "'s Team";
+    }
+
+    private BigDecimal calculateWeightedProgressScore(List<GeminiAiService.KpiProgressData> kpiData) {
+        double weighted = 0.0;
+        double totalWeight = 0.0;
+
+        for (GeminiAiService.KpiProgressData kpi : kpiData) {
+            double weight = kpi.weight;
+            if (weight <= 0) {
+                continue;
+            }
+            double progress = Math.max(0.0, Math.min(100.0, kpi.progressPercentage));
+            weighted += progress * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+
+        double score = weighted / totalWeight;
+        return BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private void attachScoreBreakdown(
+            GeminiAiService.AiAnalysisResult aiResult,
+            BigDecimal kpiProgressScore,
+            boolean reportAvailable,
+            String scoreSource) {
+        if (aiResult == null) {
+            return;
+        }
+
+        Map<String, Object> raw = aiResult.rawResponse != null ? new HashMap<>(aiResult.rawResponse) : new HashMap<>();
+        Map<String, Object> breakdown = new LinkedHashMap<>();
+        breakdown.put("kpiProgressScore", kpiProgressScore);
+        breakdown.put("aiScore", raw.getOrDefault("aiKpiScore", aiResult.kpiScore));
+        breakdown.put("finalScore", aiResult.kpiScore);
+        breakdown.put("reportAvailable", reportAvailable);
+        breakdown.put("scoreSource", scoreSource);
+        breakdown.put("scoreScale", "0-100");
+
+        raw.put("scoreBreakdown", breakdown);
+        aiResult.rawResponse = raw;
     }
 
     private String getQuarterForWeek(int weekNumber) {

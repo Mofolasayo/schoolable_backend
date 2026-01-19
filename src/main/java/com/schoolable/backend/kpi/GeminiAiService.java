@@ -172,6 +172,67 @@ public class GeminiAiService {
     }
 
     /**
+     * Generate structured JSON content and parse into a Map.
+     */
+    public StructuredResult generateStructuredResult(
+            String prompt,
+            Map<String, Object> responseSchema,
+            String promptVersion,
+            UUID jobId) {
+        return generateStructuredResult(prompt, responseSchema, promptVersion, jobId, analysisTemperature);
+    }
+
+    public StructuredResult generateStructuredInsight(
+            String prompt,
+            Map<String, Object> responseSchema,
+            String promptVersion,
+            UUID jobId) {
+        return generateStructuredResult(prompt, responseSchema, promptVersion, jobId, insightsTemperature);
+    }
+
+    private StructuredResult generateStructuredResult(
+            String prompt,
+            Map<String, Object> responseSchema,
+            String promptVersion,
+            UUID jobId,
+            double temperature) {
+        GeminiResponse aiResponse = generateStructuredJson(
+            prompt,
+            temperature,
+            responseSchema,
+            promptVersion,
+            jobId
+        );
+
+        StructuredResult result = new StructuredResult();
+        result.rawText = aiResponse.text();
+        result.promptVersion = promptVersion;
+        result.modelUsed = aiResponse.modelUsed();
+        result.requestId = aiResponse.requestId();
+        result.cacheHit = aiResponse.cacheHit();
+
+        if (aiResponse.text() == null || aiResponse.text().isBlank()) {
+            result.error = "Empty AI response";
+            return result;
+        }
+
+        try {
+            String cleanResponse = extractJsonPayload(aiResponse.text());
+            if (cleanResponse == null || cleanResponse.isBlank()) {
+                result.error = "No JSON payload found";
+                return result;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = objectMapper.readValue(cleanResponse, Map.class);
+            result.data = parsed;
+        } catch (Exception e) {
+            result.error = e.getMessage();
+        }
+
+        return result;
+    }
+
+    /**
      * Grade a daily report and provide feedback
      * Used for the "Technical Competence" pillar scoring
      */
@@ -453,12 +514,9 @@ public class GeminiAiService {
 
         try {
             // Clean the response
-            String cleanResponse = aiResponse.trim();
-            // Robust JSON extraction
-            int firstOpen = cleanResponse.indexOf('{');
-            int lastClose = cleanResponse.lastIndexOf('}');
-            if (firstOpen != -1 && lastClose != -1 && lastClose > firstOpen) {
-                cleanResponse = cleanResponse.substring(firstOpen, lastClose + 1);
+            String cleanResponse = extractJsonPayload(aiResponse);
+            if (cleanResponse == null || cleanResponse.isBlank()) {
+                return result;
             }
 
             JsonNode json = objectMapper.readTree(cleanResponse);
@@ -1036,12 +1094,9 @@ public class GeminiAiService {
         try {
             AiAnalysisResult result = new AiAnalysisResult();
             // Clean the response (remove markdown if present)
-            String cleanResponse = aiResponse.trim();
-            // Robust JSON extraction
-            int firstOpen = cleanResponse.indexOf('{');
-            int lastClose = cleanResponse.lastIndexOf('}');
-            if (firstOpen != -1 && lastClose != -1 && lastClose > firstOpen) {
-                cleanResponse = cleanResponse.substring(firstOpen, lastClose + 1);
+            String cleanResponse = extractJsonPayload(aiResponse);
+            if (cleanResponse == null || cleanResponse.isBlank()) {
+                return buildFallbackResult(kpiData, "No JSON payload found");
             }
 
             JsonNode json = objectMapper.readTree(cleanResponse);
@@ -1174,6 +1229,44 @@ public class GeminiAiService {
         return list;
     }
 
+    private String extractJsonPayload(String aiResponse) {
+        if (aiResponse == null) {
+            return null;
+        }
+
+        String trimmed = aiResponse.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            return trimmed;
+        }
+
+        int fenceStart = trimmed.indexOf("```");
+        if (fenceStart >= 0) {
+            int fenceEnd = trimmed.indexOf("```", fenceStart + 3);
+            if (fenceEnd > fenceStart) {
+                String fenced = trimmed.substring(fenceStart + 3, fenceEnd).trim();
+                if (fenced.startsWith("json")) {
+                    int newline = fenced.indexOf('\n');
+                    fenced = newline >= 0 ? fenced.substring(newline + 1).trim() : fenced.substring(4).trim();
+                }
+                if (fenced.startsWith("{") || fenced.startsWith("[")) {
+                    return fenced;
+                }
+            }
+        }
+
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1).trim();
+        }
+
+        return null;
+    }
+
     /**
      * Calculate score manually if AI fails
      */
@@ -1270,6 +1363,16 @@ public class GeminiAiService {
         public String modelUsed;
         public boolean cacheHit;
         public boolean fallback;
+    }
+
+    public static class StructuredResult {
+        public Map<String, Object> data;
+        public String rawText;
+        public String error;
+        public UUID requestId;
+        public String promptVersion;
+        public String modelUsed;
+        public boolean cacheHit;
     }
 
     /**

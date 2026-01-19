@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
@@ -62,11 +63,41 @@ public class TeamReportDocumentService {
             ResponseEntity<byte[]> response = restTemplate.getForEntity(url, byte[].class);
             if (!response.getStatusCode().is2xxSuccessful()) {
                 log.warn("Failed to download report document: status {}", response.getStatusCode());
+                if (response.getStatusCode().value() == 401 || response.getStatusCode().value() == 403) {
+                    return retryAfterUnblock(url);
+                }
                 return null;
             }
             return response.getBody();
+        } catch (HttpClientErrorException e) {
+            int status = e.getStatusCode().value();
+            if (status == 401 || status == 403) {
+                return retryAfterUnblock(url);
+            }
+            log.warn("Failed to download report document: {}", e.getMessage());
+            return null;
         } catch (Exception e) {
             log.warn("Failed to download report document: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private byte[] retryAfterUnblock(String url) {
+        boolean unblocked = storageService.unblockDelivery(url);
+        if (!unblocked) {
+            log.warn("Report delivery unblock attempt failed");
+            return null;
+        }
+
+        try {
+            ResponseEntity<byte[]> retryResponse = restTemplate.getForEntity(url, byte[].class);
+            if (!retryResponse.getStatusCode().is2xxSuccessful()) {
+                log.warn("Retry download failed: status {}", retryResponse.getStatusCode());
+                return null;
+            }
+            return retryResponse.getBody();
+        } catch (Exception e) {
+            log.warn("Retry download failed: {}", e.getMessage());
             return null;
         }
     }

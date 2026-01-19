@@ -40,6 +40,13 @@ public class ComplianceService {
     public CompliancePolicy createPolicy(CompliancePolicy policy, UUID createdBy) {
         policy.setCreatedBy(createdBy);
         policy.setLastReview(LocalDate.now());
+
+        if (policy.getCategory() == null || policy.getCategory().isBlank()) {
+            policy.setCategory("General");
+        }
+        if (policy.getType() == null || policy.getType().isBlank()) {
+            policy.setType("policy");
+        }
         
         // Auto-set next review if frequency is specified
         if (policy.getReviewFrequencyDays() != null && policy.getReviewFrequencyDays() > 0) {
@@ -59,10 +66,12 @@ public class ComplianceService {
         return policyRepository.findById(id)
                 .map(policy -> {
                     policy.setTitle(updatedPolicy.getTitle());
-                    policy.setCategory(updatedPolicy.getCategory());
+                    String category = updatedPolicy.getCategory();
+                    policy.setCategory(category != null && !category.isBlank() ? category : (policy.getCategory() != null ? policy.getCategory() : "General"));
                     policy.setDepartment(updatedPolicy.getDepartment());
                     policy.setDescription(updatedPolicy.getDescription());
-                    policy.setType(updatedPolicy.getType());
+                    String type = updatedPolicy.getType();
+                    policy.setType(type != null && !type.isBlank() ? type : (policy.getType() != null ? policy.getType() : "policy"));
                     policy.setFileUrl(updatedPolicy.getFileUrl());
                     policy.setFileName(updatedPolicy.getFileName());
                     policy.setDeadline(updatedPolicy.getDeadline());

@@ -69,8 +69,8 @@ public class PersonalInsightsService {
         Map<String, Object> performanceData = gatherPerformanceData(employeeId, profile);
         
         // Generate AI insights
-        String aiInsights = generateAiPersonalInsights(profile, performanceData);
-        
+        GeminiAiService.StructuredResult aiInsights = generateAiPersonalInsights(profile, performanceData);
+
         // Parse and return structured response
         return parsePersonalInsights(aiInsights, performanceData, profile);
     }
@@ -281,7 +281,7 @@ public class PersonalInsightsService {
         return data;
     }
 
-    private String generateAiPersonalInsights(Profile profile, Map<String, Object> data) {
+    private GeminiAiService.StructuredResult generateAiPersonalInsights(Profile profile, Map<String, Object> data) {
         String prompt = String.format("""
             You are a performance coach generating personalized insights for an employee.
             
@@ -369,10 +369,15 @@ public class PersonalInsightsService {
             data.get("improvements")
         );
 
-        return geminiService.generateContent(prompt);
+        return geminiService.generateStructuredInsight(
+            prompt,
+            personalInsightSchema(),
+            "personal-insights-v1",
+            null
+        );
     }
 
-    private Map<String, Object> parsePersonalInsights(String aiResponse, Map<String, Object> performanceData, Profile profile) {
+    private Map<String, Object> parsePersonalInsights(GeminiAiService.StructuredResult aiResponse, Map<String, Object> performanceData, Profile profile) {
         Map<String, Object> result = new HashMap<>();
         
         result.put("employeeId", profile.getId());
@@ -380,25 +385,17 @@ public class PersonalInsightsService {
         result.put("department", profile.getDepartment());
         result.put("generatedAt", OffsetDateTime.now());
         result.put("performanceData", performanceData);
+        result.put("promptVersion", aiResponse != null ? aiResponse.promptVersion : null);
+        result.put("modelUsed", aiResponse != null ? aiResponse.modelUsed : null);
+        result.put("aiRequestId", aiResponse != null ? aiResponse.requestId : null);
+        result.put("cacheHit", aiResponse != null && aiResponse.cacheHit);
         
         try {
-            // Clean the AI response
-            String cleanJson = aiResponse.trim();
-            if (cleanJson.startsWith("```json")) {
-                cleanJson = cleanJson.substring(7);
+            if (aiResponse != null && aiResponse.data != null) {
+                result.put("aiInsights", aiResponse.data);
+            } else {
+                throw new IllegalStateException(aiResponse != null ? aiResponse.error : "AI response unavailable");
             }
-            if (cleanJson.startsWith("```")) {
-                cleanJson = cleanJson.substring(3);
-            }
-            if (cleanJson.endsWith("```")) {
-                cleanJson = cleanJson.substring(0, cleanJson.length() - 3);
-            }
-            cleanJson = cleanJson.trim();
-
-            // Parse JSON using basic parsing
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            Map<String, Object> aiInsights = mapper.readValue(cleanJson, Map.class);
-            result.put("aiInsights", aiInsights);
         } catch (Exception e) {
             // Fallback if AI parsing fails
             result.put("aiInsights", Map.of(
@@ -418,6 +415,31 @@ public class PersonalInsightsService {
         }
         
         return result;
+    }
+
+    private Map<String, Object> personalInsightSchema() {
+        return Map.of(
+            "type", "object",
+            "properties", Map.of(
+                "overallAssessment", Map.of("type", "string"),
+                "performanceScore", Map.of("type", "number"),
+                "keyStrengths", Map.of("type", "array", "items", Map.of("type", "string")),
+                "improvementAreas", Map.of("type", "array", "items", Map.of("type", "string")),
+                "actionableRecommendations", Map.of("type", "array", "items", Map.of("type", "string")),
+                "skillsToFocus", Map.of("type", "array", "items", Map.of("type", "string")),
+                "motivationalMessage", Map.of("type", "string")
+            ),
+            "required", List.of(
+                "overallAssessment",
+                "performanceScore",
+                "keyStrengths",
+                "improvementAreas",
+                "actionableRecommendations",
+                "skillsToFocus",
+                "motivationalMessage"
+            ),
+            "additionalProperties", false
+        );
     }
 
     private int calculateBasicScore(Map<String, Object> data) {

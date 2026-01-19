@@ -387,6 +387,23 @@ public class HRManagementService {
     }
 
     /**
+     * Get PIP statistics with alert-oriented counts.
+     */
+    public Map<String, Object> getPipStats() {
+        Map<String, Object> stats = new HashMap<>();
+        List<PipRecord> active = pipRepository.findActivePips();
+        long overdue = active.stream().filter(PipRecord::isOverdue).count();
+        long dueSoon = active.stream()
+            .filter(record -> !record.isOverdue() && record.getDaysRemaining() <= 7)
+            .count();
+
+        stats.put("active", pipRepository.countActivePips());
+        stats.put("overdue", overdue);
+        stats.put("dueSoon", dueSoon);
+        return stats;
+    }
+
+    /**
      * Create probation record for new hire.
      */
     @Transactional

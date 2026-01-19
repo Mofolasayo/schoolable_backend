@@ -659,6 +659,10 @@ public class KpiController {
         formatted.put("aiRequestId", insight.getAiRequestId());
         formatted.put("aiJobId", insight.getAiJobId());
         formatted.put("generationStatus", insight.getGenerationStatus());
+        formatted.put("rawAiResponse", insight.getRawAiResponse());
+        if (insight.getRawAiResponse() != null && insight.getRawAiResponse().get("scoreBreakdown") != null) {
+            formatted.put("scoreBreakdown", insight.getRawAiResponse().get("scoreBreakdown"));
+        }
         return formatted;
     }
 

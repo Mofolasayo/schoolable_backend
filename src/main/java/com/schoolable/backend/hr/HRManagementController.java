@@ -339,6 +339,14 @@ public class HRManagementController {
     }
 
     /**
+     * Get PIP statistics (alert counts).
+     */
+    @GetMapping("/pip/stats")
+    public ResponseEntity<?> getPipStats() {
+        return ResponseEntity.ok(hrService.getPipStats());
+    }
+
+    /**
      * Create a new PIP.
      */
     @PostMapping("/pip")
