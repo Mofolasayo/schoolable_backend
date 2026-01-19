@@ -390,13 +390,14 @@ public class WeeklyKpiContextService {
         int presentDays = 0;
         int onTimeDays = 0;
         for (LocalDate date = weekStart; !date.isAfter(weekEnd); date = date.plusDays(1)) {
-            AttendancePolicy policy = attendancePolicyService.resolvePolicy(employeeId, date);
+            LocalDate currentDate = date;
+            AttendancePolicy policy = attendancePolicyService.resolvePolicy(employeeId, currentDate);
             if (!policy.isWorkDay() || policy.isHoliday() || policy.isOnLeave()) {
                 continue;
             }
             expectedDays++;
             Attendance record = weekAttendance.stream()
-                .filter(a -> date.equals(a.getDate()))
+                .filter(a -> currentDate.equals(a.getDate()))
                 .findFirst()
                 .orElse(null);
             if (record != null && record.getCheckIn() != null) {
