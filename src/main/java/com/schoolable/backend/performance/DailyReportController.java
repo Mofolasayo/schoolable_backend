@@ -1,5 +1,7 @@
 package com.schoolable.backend.performance;
 
+import com.schoolable.backend.attendance.AttendancePolicyService;
+import com.schoolable.backend.attendance.WorkSchedule;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -10,8 +12,12 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.WeekFields;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -25,6 +31,8 @@ import java.util.stream.Collectors;
 @Tag(name = "Daily Reports")
 public class DailyReportController {
 
+    private static final LocalTime REPORT_CUTOFF = LocalTime.of(18, 0);
+
     @Autowired
     private DailyReportRepository dailyReportRepository;
 
@@ -33,6 +41,9 @@ public class DailyReportController {
 
     @Autowired
     private DailyReportAiService dailyReportAiService;
+
+    @Autowired
+    private AttendancePolicyService attendancePolicyService;
 
     // ==================== MY REPORTS ====================
 
@@ -66,13 +77,16 @@ public class DailyReportController {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
         UUID userId = (UUID) auth.getPrincipal();
-        LocalDate today = LocalDate.now();
+        ZoneId zone = resolveUserZone(userId, LocalDate.now());
+        LocalDate today = LocalDate.now(zone);
 
         Optional<DailyReport> report = dailyReportRepository.findByEmployeeIdAndReportDate(userId, today);
+        SubmissionWindow window = buildSubmissionWindow(today, zone);
 
         Map<String, Object> response = new HashMap<>();
         response.put("hasSubmittedToday", report.isPresent());
         response.put("date", today.toString());
+        response.put("submissionWindow", toSubmissionWindowPayload(window));
         
         if (report.isPresent()) {
             response.put("report", toDto(report.get()));
@@ -88,7 +102,28 @@ public class DailyReportController {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
         UUID userId = (UUID) auth.getPrincipal();
-        LocalDate reportDate = request.reportDate() != null ? request.reportDate() : LocalDate.now();
+        ZoneId zone = resolveUserZone(userId, LocalDate.now());
+        LocalDate today = LocalDate.now(zone);
+        LocalDate reportDate = request.reportDate() != null ? request.reportDate() : today;
+        SubmissionWindow window = buildSubmissionWindow(reportDate, zone);
+
+        if (!reportDate.equals(today)) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Reports can only be submitted for today",
+                "serverDate", today.toString(),
+                "timezone", zone.getId(),
+                "submissionWindow", toSubmissionWindowPayload(window)
+            ));
+        }
+
+        if (!window.canSubmit()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Submission window closed at " + REPORT_CUTOFF,
+                "serverDate", today.toString(),
+                "timezone", zone.getId(),
+                "submissionWindow", toSubmissionWindowPayload(window)
+            ));
+        }
 
         // Check if already submitted for this date
         Optional<DailyReport> existing = dailyReportRepository.findByEmployeeIdAndReportDate(userId, reportDate);
@@ -150,7 +185,9 @@ public class DailyReportController {
         }
 
         // Only allow edits on same day
-        if (!report.getReportDate().equals(LocalDate.now())) {
+        ZoneId zone = resolveUserZone(userId, LocalDate.now());
+        LocalDate today = LocalDate.now(zone);
+        if (!report.getReportDate().equals(today)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Can only edit today's report"));
         }
 
@@ -185,7 +222,8 @@ public class DailyReportController {
         UUID userId = (UUID) auth.getPrincipal();
 
         // Get this week's reports
-        LocalDate today = LocalDate.now();
+        ZoneId zone = resolveUserZone(userId, LocalDate.now());
+        LocalDate today = LocalDate.now(zone);
         LocalDate weekStart = today.with(WeekFields.ISO.dayOfWeek(), 1);
         LocalDate weekEnd = weekStart.plusDays(6);
 
@@ -207,7 +245,9 @@ public class DailyReportController {
             "weeklyAverageScore", weeklyAvgScore != null ? weeklyAvgScore : 0,
             "monthlyAverageScore", monthlyAvgScore != null ? monthlyAvgScore : 0,
             "quarterlyAverageScore", quarterlyAvgScore != null ? quarterlyAvgScore : 0,
-            "hasSubmittedToday", dailyReportRepository.existsByEmployeeIdAndReportDate(userId, today)
+            "hasSubmittedToday", dailyReportRepository.existsByEmployeeIdAndReportDate(userId, today),
+            "serverDate", today.toString(),
+            "timezone", zone.getId()
         ));
     }
 
@@ -368,7 +408,8 @@ public class DailyReportController {
             return ResponseEntity.badRequest().body(Map.of("error", "No department assigned"));
         }
 
-        LocalDate endDate = date != null ? LocalDate.parse(date) : LocalDate.now();
+        ZoneId zone = resolveUserZone(userId, LocalDate.now());
+        LocalDate endDate = date != null ? LocalDate.parse(date) : LocalDate.now(zone);
         LocalDate startDate = days != null ? endDate.minusDays(days) : endDate;
 
         List<DailyReport> reports = dailyReportRepository.findByDepartmentAndDateRange(department, startDate, endDate);
@@ -456,7 +497,8 @@ public class DailyReportController {
             return ResponseEntity.badRequest().body(Map.of("error", "No department assigned"));
         }
 
-        LocalDate targetDate = date != null ? LocalDate.parse(date) : LocalDate.now();
+        ZoneId zone = resolveUserZone(userId, LocalDate.now());
+        LocalDate targetDate = date != null ? LocalDate.parse(date) : LocalDate.now(zone);
 
         // Get all team members
         List<Profile> teamMembers = profileRepository.findByDepartmentAndStatus(department, "active");
@@ -500,11 +542,45 @@ public class DailyReportController {
             "submittedCount", submittedCount,
             "pendingCount", pendingCount,
             "averageAiScore", avgScore,
-            "members", membersList
+            "members", membersList,
+            "timezone", zone.getId()
         ));
     }
 
     // ==================== HELPER METHODS ====================
+
+    private ZoneId resolveUserZone(UUID userId, LocalDate referenceDate) {
+        AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(userId, referenceDate);
+        WorkSchedule schedule = policy != null ? policy.schedule() : null;
+        return attendancePolicyService.resolveZone(schedule, null);
+    }
+
+    private SubmissionWindow buildSubmissionWindow(LocalDate reportDate, ZoneId zone) {
+        ZonedDateTime now = ZonedDateTime.now(zone);
+        LocalDate today = now.toLocalDate();
+        ZonedDateTime cutoffAt = ZonedDateTime.of(reportDate, REPORT_CUTOFF, zone);
+        boolean isToday = reportDate.equals(today);
+        boolean isLate = isToday && now.isAfter(cutoffAt);
+        boolean canSubmit = isToday && !now.isAfter(cutoffAt);
+        long minutesRemaining = isToday
+            ? Math.max(0, Duration.between(now, cutoffAt).toMinutes())
+            : 0;
+        return new SubmissionWindow(zone, today, reportDate, now, cutoffAt, isLate, canSubmit, minutesRemaining);
+    }
+
+    private Map<String, Object> toSubmissionWindowPayload(SubmissionWindow window) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("serverTime", window.now().toString());
+        payload.put("timezone", window.zone().getId());
+        payload.put("serverDate", window.today().toString());
+        payload.put("reportDate", window.reportDate().toString());
+        payload.put("cutoffTime", REPORT_CUTOFF.toString());
+        payload.put("cutoffAt", window.cutoffAt().toString());
+        payload.put("isLate", window.isLate());
+        payload.put("canSubmit", window.canSubmit());
+        payload.put("minutesRemaining", window.minutesRemaining());
+        return payload;
+    }
 
     private boolean isAdmin(Authentication auth) {
         if (auth == null || auth.getPrincipal() == null) {
@@ -517,6 +593,17 @@ public class DailyReportController {
         }
         return profile.getRole().toLowerCase().contains("admin");
     }
+
+    private record SubmissionWindow(
+        ZoneId zone,
+        LocalDate today,
+        LocalDate reportDate,
+        ZonedDateTime now,
+        ZonedDateTime cutoffAt,
+        boolean isLate,
+        boolean canSubmit,
+        long minutesRemaining
+    ) {}
 
     private Map<String, Object> toDto(DailyReport r) {
         Map<String, Object> dto = new LinkedHashMap<>();

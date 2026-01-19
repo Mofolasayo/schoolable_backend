@@ -1,5 +1,7 @@
 package com.schoolable.backend.performance;
 
+import com.schoolable.backend.attendance.AttendancePolicyService;
+import com.schoolable.backend.attendance.WorkSchedule;
 import com.schoolable.backend.kpi.KpiAnalysisService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
@@ -10,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.WeekFields;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -22,13 +25,16 @@ public class WeeklyReportService {
     private final WeeklyReportRepository weeklyReportRepository;
     private final ProfileRepository profileRepository;
     private final KpiAnalysisService kpiAnalysisService;
+    private final AttendancePolicyService attendancePolicyService;
 
     public WeeklyReportService(WeeklyReportRepository weeklyReportRepository, 
                                ProfileRepository profileRepository,
-                               KpiAnalysisService kpiAnalysisService) {
+                               KpiAnalysisService kpiAnalysisService,
+                               AttendancePolicyService attendancePolicyService) {
         this.weeklyReportRepository = weeklyReportRepository;
         this.profileRepository = profileRepository;
         this.kpiAnalysisService = kpiAnalysisService;
+        this.attendancePolicyService = attendancePolicyService;
     }
 
     /**
@@ -43,6 +49,8 @@ public class WeeklyReportService {
         if (!Boolean.TRUE.equals(teamLead.getIsTeamLead())) {
             throw new RuntimeException("Only team leads can submit weekly reports");
         }
+
+        enforceSubmissionWindow(teamLeadId, request.getWeekNumber(), request.getYear());
 
         UUID employeeId = UUID.fromString(request.getEmployeeId());
 
@@ -142,6 +150,8 @@ public class WeeklyReportService {
         if (!Boolean.TRUE.equals(teamLead.getIsTeamLead())) {
             throw new RuntimeException("Only team leads can submit weekly reports");
         }
+
+        enforceSubmissionWindow(teamLeadId, request.getWeekNumber(), request.getYear());
 
         if (request.getTeamReportUrl() == null || request.getTeamReportUrl().isBlank()) {
             throw new RuntimeException("Team report document is required");
@@ -386,6 +396,23 @@ public class WeeklyReportService {
         Profile employee = profileRepository.findById(report.getEmployeeId()).orElse(null);
         Profile reviewer = profileRepository.findById(report.getReviewerId()).orElse(null);
         return mapToResponse(report, employee, reviewer);
+    }
+
+    private void enforceSubmissionWindow(UUID teamLeadId, int weekNumber, int year) {
+        AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(teamLeadId, LocalDate.now());
+        WorkSchedule schedule = policy != null ? policy.schedule() : null;
+        ZoneId zone = attendancePolicyService.resolveZone(schedule, null);
+        LocalDate today = LocalDate.now(zone);
+
+        if (today.getDayOfWeek() != DayOfWeek.FRIDAY) {
+            throw new RuntimeException("Weekly reports can only be submitted on Fridays");
+        }
+
+        int currentWeek = today.get(WeekFields.ISO.weekOfWeekBasedYear());
+        int currentYear = today.get(WeekFields.ISO.weekBasedYear());
+        if (weekNumber != currentWeek || year != currentYear) {
+            throw new RuntimeException("Weekly reports must be submitted for the current week");
+        }
     }
 
     private String calculateGrade(Double aura) {

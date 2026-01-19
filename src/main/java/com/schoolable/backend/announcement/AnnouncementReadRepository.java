@@ -12,6 +12,9 @@ public interface AnnouncementReadRepository extends JpaRepository<AnnouncementRe
     
     // Find all announcement IDs that a user has read
     List<AnnouncementRead> findByUserId(UUID userId);
+
+    // Find all reads for a specific announcement
+    List<AnnouncementRead> findByAnnouncementId(UUID announcementId);
     
     // Check if user has read a specific announcement
     boolean existsByUserIdAndAnnouncementId(UUID userId, UUID announcementId);

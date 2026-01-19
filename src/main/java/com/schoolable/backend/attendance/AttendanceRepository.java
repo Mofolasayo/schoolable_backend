@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -31,6 +32,7 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Long> {
     
     // Count by status for a date
     long countByDateAndStatus(LocalDate date, String status);
+    long countByDateAndStatusIn(LocalDate date, Collection<String> statuses);
     
     // Find attendance that hasn't checked out yet
     List<Attendance> findByUserIdAndCheckOutIsNull(UUID userId);

@@ -8,9 +8,11 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class AttendancePolicyService {
@@ -45,8 +47,21 @@ public class AttendancePolicyService {
             .flatMap(item -> workScheduleRepository.findById(item.getScheduleId()))
             .orElseGet(this::getDefaultSchedule);
 
-        boolean isHoliday = !holidayCalendarRepository.findByHolidayDateAndDepartment(date, department).isEmpty()
-            || !holidayCalendarRepository.findByHolidayDate(date).isEmpty();
+        List<HolidayCalendar> holidays = new ArrayList<>();
+        if (department != null && !department.isBlank()) {
+            holidays.addAll(holidayCalendarRepository.findByHolidayDateAndDepartment(date, department));
+        }
+        holidays.addAll(holidayCalendarRepository.findByHolidayDate(date));
+        boolean isHoliday = !holidays.isEmpty();
+        String holidayName = holidays.stream()
+            .map(HolidayCalendar::getName)
+            .filter(name -> name != null && !name.isBlank())
+            .map(String::trim)
+            .distinct()
+            .collect(Collectors.joining(", "));
+        if (holidayName.isBlank()) {
+            holidayName = null;
+        }
         boolean isOnLeave = !timeOffRequestRepository.findApprovedForDate(userId, date).isEmpty();
 
         List<String> scheduleDays = schedule != null ? schedule.getDaysOfWeekList() : List.of();
@@ -65,7 +80,7 @@ public class AttendancePolicyService {
             isWorkDay = !isDefaultNonWorkingDay(date.getDayOfWeek());
         }
 
-        return new AttendancePolicy(schedule, isWorkDay, isHoliday, isOnLeave, department);
+        return new AttendancePolicy(schedule, isWorkDay, isHoliday, isOnLeave, department, holidayName);
     }
 
     public LocationValidation validateLocation(Double lat, Double lon) {
@@ -229,7 +244,8 @@ public class AttendancePolicyService {
         boolean isWorkDay,
         boolean isHoliday,
         boolean isOnLeave,
-        String department
+        String department,
+        String holidayName
     ) {}
 
     public record CheckInEvaluation(boolean isLate, int minutesLate) {}

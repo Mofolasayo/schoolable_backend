@@ -129,7 +129,8 @@ public class ComplianceController {
             return ResponseEntity.ok(Map.of(
                     "message", "Submission successful",
                     "status", submission.getStatus(),
-                    "submissionId", submission.getId()
+                    "submissionId", submission.getId(),
+                    "policyId", policyId
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -173,13 +174,15 @@ public class ComplianceController {
      */
     @GetMapping("/metrics")
     public ResponseEntity<?> getComplianceMetrics(Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
-        
-        if (profile == null || !"admin".equalsIgnoreCase(profile.getRole())) {
+        Profile profile = resolveProfile(auth);
+
+        if (profile == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Profile not found"));
+        }
+        if (!isAdmin(auth, profile)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
-        
+
         return ResponseEntity.ok(complianceService.getComplianceMetrics());
     }
     
@@ -188,10 +191,12 @@ public class ComplianceController {
      */
     @GetMapping("/policies/{policyId}/submissions")
     public ResponseEntity<?> getPolicySubmissions(@PathVariable UUID policyId, Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
-        
-        if (profile == null || !"admin".equalsIgnoreCase(profile.getRole())) {
+        Profile profile = resolveProfile(auth);
+
+        if (profile == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Profile not found"));
+        }
+        if (!isAdmin(auth, profile)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
         
@@ -227,10 +232,12 @@ public class ComplianceController {
             @PathVariable UUID submissionId,
             @RequestBody Map<String, String> data,
             Authentication auth) {
-        String email = auth.getName();
-        Profile profile = profileRepository.findByEmail(email).orElse(null);
-        
-        if (profile == null || !"admin".equalsIgnoreCase(profile.getRole())) {
+        Profile profile = resolveProfile(auth);
+
+        if (profile == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Profile not found"));
+        }
+        if (!isAdmin(auth, profile)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
         

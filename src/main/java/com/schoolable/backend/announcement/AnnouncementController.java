@@ -41,6 +41,7 @@ public class AnnouncementController {
         // Get user's department for audience filtering
         var profileOpt = profileRepository.findById(userId);
         String userDepartment = profileOpt.map(Profile::getDepartment).orElse(null);
+        boolean isTeamLead = profileOpt.map(Profile::getIsTeamLead).orElse(false);
 
         // Get IDs of announcements the user has read
         Set<UUID> readIds = announcementReadRepository.findByUserId(userId)
@@ -57,6 +58,9 @@ public class AnnouncementController {
                     String audience = a.getAudience();
                     if (audience == null || "All Staff".equalsIgnoreCase(audience)) {
                         return true;
+                    }
+                    if (isTeamLeadAudience(audience)) {
+                        return isTeamLead;
                     }
                     return userDepartment != null && audience.equalsIgnoreCase(userDepartment);
                 })
@@ -77,6 +81,7 @@ public class AnnouncementController {
         // Get user's department for audience filtering
         var profileOpt = profileRepository.findById(userId);
         String userDepartment = profileOpt.map(Profile::getDepartment).orElse(null);
+        boolean isTeamLead = profileOpt.map(Profile::getIsTeamLead).orElse(false);
 
         // Get IDs of announcements the user has read
         Set<UUID> readIds = announcementReadRepository.findByUserId(userId)
@@ -93,6 +98,9 @@ public class AnnouncementController {
                     String audience = a.getAudience();
                     if (audience == null || "All Staff".equalsIgnoreCase(audience)) {
                         return true;
+                    }
+                    if (isTeamLeadAudience(audience)) {
+                        return isTeamLead;
                     }
                     return userDepartment != null && audience.equalsIgnoreCase(userDepartment);
                 })
@@ -117,6 +125,64 @@ public class AnnouncementController {
 
         boolean isRead = announcementReadRepository.existsByUserIdAndAnnouncementId(userId, id);
         return ResponseEntity.ok(buildAnnouncementResponse(announcementOpt.get(), isRead));
+    }
+
+    @Operation(summary = "Get list of users who read an announcement (admin or team lead)")
+    @GetMapping("/{id}/reads")
+    public ResponseEntity<?> getAnnouncementReads(@PathVariable UUID id, Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        var profileOpt = profileRepository.findById(userId);
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Profile not found"));
+        }
+
+        Profile profile = profileOpt.get();
+        boolean isAdmin = "admin".equalsIgnoreCase(profile.getRole());
+        boolean isTeamLead = profile.getIsTeamLead() != null && profile.getIsTeamLead();
+        if (!isAdmin && !isTeamLead) {
+            return ResponseEntity.status(403).body(Map.of("error", "Only admins and team leads can view readers"));
+        }
+
+        if (!announcementRepository.existsById(id)) {
+            return ResponseEntity.status(404).body(Map.of("error", "Announcement not found"));
+        }
+
+        List<AnnouncementRead> reads = announcementReadRepository.findByAnnouncementId(id);
+        if (reads.isEmpty()) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        List<UUID> readerIds = reads.stream()
+                .map(AnnouncementRead::getUserId)
+                .distinct()
+                .toList();
+
+        Map<UUID, Profile> profilesById = profileRepository.findAllById(readerIds).stream()
+                .collect(Collectors.toMap(Profile::getId, p -> p));
+
+        List<Map<String, Object>> result = reads.stream()
+                .sorted(Comparator.comparing(AnnouncementRead::getReadAt).reversed())
+                .map(read -> {
+                    Map<String, Object> row = new HashMap<>();
+                    Profile reader = profilesById.get(read.getUserId());
+                    row.put("user_id", read.getUserId());
+                    row.put("read_at", read.getReadAt());
+                    if (reader != null) {
+                        row.put("full_name", reader.getFullName());
+                        row.put("email", reader.getEmail());
+                        row.put("department", reader.getDepartment());
+                        row.put("role", reader.getRole());
+                        row.put("is_team_lead", reader.getIsTeamLead());
+                    }
+                    return row;
+                })
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(result);
     }
 
     @Operation(summary = "Create a new announcement (admin or team lead)")
@@ -252,6 +318,10 @@ public class AnnouncementController {
         response.put("created_at", a.getCreatedAt());
         response.put("is_read", isRead);
         return response;
+    }
+
+    private boolean isTeamLeadAudience(String audience) {
+        return "Team Leads".equalsIgnoreCase(audience) || "Team Lead".equalsIgnoreCase(audience);
     }
 
     public record CreateAnnouncementRequest(

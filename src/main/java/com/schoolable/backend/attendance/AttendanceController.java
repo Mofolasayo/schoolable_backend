@@ -60,6 +60,13 @@ public class AttendanceController {
         }
         UUID userId = (UUID) auth.getPrincipal();
         LocalDate today = LocalDate.now();
+        String deviceId = normalizeString(req.deviceId());
+        if (deviceId == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "device_id is required",
+                "code", "DEVICE_ID_REQUIRED"
+            ));
+        }
 
         // Check if already checked in today
         var existingAttendance = attendanceRepository.findByUserIdAndDate(userId, today);
@@ -88,22 +95,29 @@ public class AttendanceController {
         boolean isRemote = Boolean.TRUE.equals(req.isRemote());
         boolean remoteAllowed = policy.schedule() != null && Boolean.TRUE.equals(policy.schedule().getRemoteAllowed());
         boolean withinRadius = locationValidation.withinRadius();
-        if (isRemote && remoteAllowed) {
-            withinRadius = true;
+        if (isRemote && !remoteAllowed) {
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Remote check-in is not allowed today. Please check in at the office.",
+                "code", "REMOTE_NOT_ALLOWED"
+            ));
+        }
+        if (!isRemote && !withinRadius) {
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Please go to the office to check in.",
+                "code", "OUTSIDE_GEOFENCE"
+            ));
         }
 
         LocalTime now = LocalTime.now();
         AttendancePolicyService.CheckInEvaluation evaluation = attendancePolicyService.evaluateCheckIn(now, policy.schedule());
 
         String status;
-        if (policy.isHoliday() || policy.isOnLeave() || !policy.isWorkDay()) {
-            status = "excused";
-        } else if (evaluation.isLate()) {
+        if (evaluation.isLate()) {
             status = "late";
         } else {
             status = "present";
         }
-        boolean requiresBiometric = policy.isWorkDay() && !policy.isHoliday() && !policy.isOnLeave();
+        boolean requiresBiometric = policy.isWorkDay() && !policy.isHoliday() && !policy.isOnLeave() && !isRemote;
         if (requiresBiometric && (req.photoUrl() == null || req.photoUrl().isBlank())) {
             return ResponseEntity.badRequest().body(Map.of(
                 "error", "photo_url is required for check-in",
@@ -112,28 +126,18 @@ public class AttendanceController {
         }
 
         Profile profile = profileRepository.findById(userId).orElse(null);
-        if (requiresBiometric) {
-            String deviceId = normalizeString(req.deviceId());
-            if (deviceId == null) {
+        if (profile != null) {
+            String registeredDeviceId = normalizeString(profile.getCheckinDeviceId());
+            if (registeredDeviceId == null) {
+                profile.setCheckinDeviceId(deviceId);
+                profile.setCheckinDeviceInfo(req.deviceInfo());
+                profile.setCheckinDeviceRegisteredAt(OffsetDateTime.now());
+                profileRepository.save(profile);
+            } else if (!registeredDeviceId.equals(deviceId)) {
                 return ResponseEntity.status(403).body(Map.of(
                     "error", "Verification failed",
                     "code", "VERIFICATION_FAILED"
                 ));
-            }
-
-            if (profile != null) {
-                String registeredDeviceId = normalizeString(profile.getCheckinDeviceId());
-                if (registeredDeviceId == null) {
-                    profile.setCheckinDeviceId(deviceId);
-                    profile.setCheckinDeviceInfo(req.deviceInfo());
-                    profile.setCheckinDeviceRegisteredAt(OffsetDateTime.now());
-                    profileRepository.save(profile);
-                } else if (!registeredDeviceId.equals(deviceId)) {
-                    return ResponseEntity.status(403).body(Map.of(
-                        "error", "Verification failed",
-                        "code", "VERIFICATION_FAILED"
-                    ));
-                }
             }
         }
 
@@ -328,24 +332,23 @@ public class AttendanceController {
 
         LocalDate today = LocalDate.now();
         long present = attendanceRepository.countByDateAndStatus(today, "present");
-        long late = attendanceRepository.countByDateAndStatus(today, "late");
+        long totalLate = attendanceRepository.countByDateAndStatusIn(today, List.of("late", "excused"));
         long absent = attendanceRepository.countByDateAndStatus(today, "absent");
-        long excused = attendanceRepository.countByDateAndStatus(today, "excused");
 
-        // Get total expected staff count (excluding admins and excused days)
+        // Get total expected staff count (excluding admins and non-workdays)
         List<Profile> staff = profileRepository.findByRoleNot("admin");
         long totalStaff = staff.stream().filter(profile -> {
             AttendancePolicyService.AttendancePolicy policy = attendancePolicyService.resolvePolicy(profile.getId(), today);
             return policy.isWorkDay() && !policy.isHoliday() && !policy.isOnLeave();
         }).count();
-        long checkedIn = present + late;
+        long checkedIn = present + totalLate;
 
         Map<String, Object> metrics = new HashMap<>();
         metrics.put("date", today.toString());
         metrics.put("present", present);
-        metrics.put("late", late);
+        metrics.put("late", totalLate);
         metrics.put("absent", absent);
-        metrics.put("excused", excused);
+        metrics.put("excused", 0);
         metrics.put("total_checked_in", checkedIn);
         metrics.put("total_staff", totalStaff);
         metrics.put("pending", Math.max(0, totalStaff - checkedIn));
@@ -431,6 +434,16 @@ public class AttendanceController {
                     absent.put("liveness_type", null);
                     absent.put("liveness_passed", null);
                     absent.put("face_match_provider", null);
+                    Map<String, Object> photo = new LinkedHashMap<>();
+                    photo.put("url", null);
+                    photo.put("verification_status", null);
+                    photo.put("face_match_score", null);
+                    photo.put("face_match_provider", null);
+                    photo.put("liveness_score", null);
+                    photo.put("liveness_type", null);
+                    photo.put("liveness_passed", null);
+                    photo.put("retention_until", null);
+                    absent.put("photo", photo);
                     absent.put("note", "Auto-marked absent");
 
                     Map<String, Object> user = new HashMap<>();
@@ -587,13 +600,13 @@ public class AttendanceController {
 
         FaceMatchResult result = faceMatchService.compare(profile.getReferenceFaceUrl(), currentFaceUrl);
 
-        return ResponseEntity.ok(Map.of(
-            "match", result.match(),
-            "confidence", result.confidence(),
-            "verified", result.match(),
-            "provider", result.provider(),
-            "message", result.message()
-        ));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("match", result.match());
+        response.put("confidence", result.confidence());
+        response.put("verified", result.match());
+        response.put("provider", result.provider());
+        response.put("message", result.message());
+        return ResponseEntity.ok(response);
     }
 
     // ==================== OFFICE LOCATIONS ====================
@@ -606,15 +619,17 @@ public class AttendanceController {
         }
 
         List<OfficeLocation> offices = officeLocationRepository.findByIsActiveTrue();
-        return ResponseEntity.ok(offices.stream().map(o -> Map.of(
-                "id", o.getId(),
-                "name", o.getName(),
-                "address", o.getAddress(),
-                "latitude", o.getLatitude(),
-                "longitude", o.getLongitude(),
-                "radius_meters", o.getRadiusMeters(),
-                "timezone", o.getTimezone()
-        )).toList());
+        return ResponseEntity.ok(offices.stream().map(o -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", o.getId());
+            item.put("name", o.getName());
+            item.put("address", o.getAddress());
+            item.put("latitude", o.getLatitude());
+            item.put("longitude", o.getLongitude());
+            item.put("radius_meters", o.getRadiusMeters());
+            item.put("timezone", o.getTimezone());
+            return item;
+        }).toList());
     }
 
     @Operation(summary = "Get today's attendance policy for current user")
@@ -635,6 +650,7 @@ public class AttendanceController {
         response.put("isWorkDay", policy.isWorkDay());
         response.put("isHoliday", policy.isHoliday());
         response.put("isOnLeave", policy.isOnLeave());
+        response.put("holidayName", policy.holidayName());
 
         if (schedule != null) {
             Map<String, Object> scheduleDto = new LinkedHashMap<>();
@@ -706,14 +722,16 @@ public class AttendanceController {
                 .sorted(Comparator.comparing(HolidayCalendar::getHolidayDate))
                 .toList();
 
-        return ResponseEntity.ok(holidays.stream().map(item -> Map.of(
-                "id", item.getId(),
-                "holiday_date", item.getHolidayDate() != null ? item.getHolidayDate().toString() : null,
-                "name", item.getName(),
-                "department", item.getDepartment(),
-                "region", item.getRegion(),
-                "is_paid", item.getIsPaid()
-        )).toList());
+        return ResponseEntity.ok(holidays.stream().map(item -> {
+            Map<String, Object> dto = new LinkedHashMap<>();
+            dto.put("id", item.getId());
+            dto.put("holiday_date", item.getHolidayDate() != null ? item.getHolidayDate().toString() : null);
+            dto.put("name", item.getName());
+            dto.put("department", item.getDepartment());
+            dto.put("region", item.getRegion());
+            dto.put("is_paid", item.getIsPaid());
+            return dto;
+        }).toList());
     }
 
     @Operation(summary = "Create a public holiday")
@@ -785,14 +803,14 @@ public class AttendanceController {
             }
 
             HolidayCalendar saved = holidayCalendarRepository.save(holiday);
-            created.add(Map.of(
-                    "id", saved.getId(),
-                    "holiday_date", saved.getHolidayDate() != null ? saved.getHolidayDate().toString() : null,
-                    "name", saved.getName(),
-                    "department", saved.getDepartment(),
-                    "region", saved.getRegion(),
-                    "is_paid", saved.getIsPaid()
-            ));
+            Map<String, Object> createdItem = new LinkedHashMap<>();
+            createdItem.put("id", saved.getId());
+            createdItem.put("holiday_date", saved.getHolidayDate() != null ? saved.getHolidayDate().toString() : null);
+            createdItem.put("name", saved.getName());
+            createdItem.put("department", saved.getDepartment());
+            createdItem.put("region", saved.getRegion());
+            createdItem.put("is_paid", saved.getIsPaid());
+            created.add(createdItem);
         }
 
         if (created.isEmpty() && !skipped.isEmpty()) {
@@ -864,6 +882,176 @@ public class AttendanceController {
         return ResponseEntity.ok(response);
     }
 
+    // ==================== TIME OFF REQUESTS ====================
+
+    @Operation(summary = "Submit a time off request (mobile)")
+    @PostMapping("/time-off/requests")
+    public ResponseEntity<?> createTimeOffRequest(@RequestBody TimeOffRequestPayload req, Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        if (req == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Request body is required"));
+        }
+        if (req.startDate() == null || req.startDate().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "start_date is required"));
+        }
+        if (req.endDate() == null || req.endDate().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "end_date is required"));
+        }
+
+        LocalDate start;
+        LocalDate end;
+        try {
+            start = LocalDate.parse(req.startDate());
+            end = LocalDate.parse(req.endDate());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid date range"));
+        }
+        if (end.isBefore(start)) {
+            LocalDate swap = start;
+            start = end;
+            end = swap;
+        }
+
+        List<TimeOffRequest> overlapping = timeOffRequestRepository.findActiveOverlappingForEmployee(userId, start, end);
+        if (!overlapping.isEmpty()) {
+            return ResponseEntity.status(409).body(Map.of(
+                "error", "You already have a pending or approved leave within this range"
+            ));
+        }
+
+        TimeOffRequest request = new TimeOffRequest();
+        request.setEmployeeId(userId);
+        request.setStartDate(start);
+        request.setEndDate(end);
+        request.setType(req.type() != null && !req.type().isBlank() ? req.type().trim() : "leave");
+        if (req.notes() != null && !req.notes().isBlank()) {
+            request.setNotes(req.notes().trim());
+        }
+
+        TimeOffRequest saved = timeOffRequestRepository.save(request);
+        Profile profile = profileRepository.findById(userId).orElse(null);
+        return ResponseEntity.ok(buildTimeOffResponse(saved, profile));
+    }
+
+    @Operation(summary = "List current user's time off requests (mobile)")
+    @GetMapping("/time-off/requests")
+    public ResponseEntity<?> getMyTimeOffRequests(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+        UUID userId = (UUID) auth.getPrincipal();
+
+        List<TimeOffRequest> requests = timeOffRequestRepository.findByEmployeeIdOrderByCreatedAtDesc(userId);
+        Profile profile = profileRepository.findById(userId).orElse(null);
+        List<Map<String, Object>> response = requests.stream()
+            .map(item -> buildTimeOffResponse(item, profile))
+            .toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "List time off requests (admin/dashboard)")
+    @GetMapping("/time-off/requests/all")
+    public ResponseEntity<?> getAllTimeOffRequests(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String department,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            Authentication auth) {
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        TimeOffRequest.Status statusFilter = parseTimeOffStatus(status);
+        List<TimeOffRequest> requests = statusFilter != null
+            ? timeOffRequestRepository.findByStatusOrderByCreatedAtDesc(statusFilter)
+            : timeOffRequestRepository.findAllByOrderByCreatedAtDesc();
+
+        LocalDate start = null;
+        LocalDate end = null;
+        try {
+            if (startDate != null && !startDate.isBlank()) {
+                start = LocalDate.parse(startDate);
+            }
+            if (endDate != null && !endDate.isBlank()) {
+                end = LocalDate.parse(endDate);
+            }
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid date range"));
+        }
+
+        Map<UUID, Profile> profiles = new HashMap<>();
+        List<Map<String, Object>> response = new ArrayList<>();
+        for (TimeOffRequest request : requests) {
+            if (start != null && request.getEndDate() != null && request.getEndDate().isBefore(start)) {
+                continue;
+            }
+            if (end != null && request.getStartDate() != null && request.getStartDate().isAfter(end)) {
+                continue;
+            }
+
+            Profile profile = profiles.computeIfAbsent(request.getEmployeeId(), id ->
+                profileRepository.findById(id).orElse(null));
+
+            if (department != null && !department.isBlank() && profile != null && profile.getDepartment() != null
+                && !department.equalsIgnoreCase(profile.getDepartment())) {
+                continue;
+            }
+
+            response.add(buildTimeOffResponse(request, profile));
+        }
+
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Approve or reject a time off request (admin)")
+    @PostMapping("/time-off/requests/{id}/decision")
+    public ResponseEntity<?> reviewTimeOffRequest(
+            @PathVariable UUID id,
+            @RequestBody TimeOffDecision req,
+            Authentication auth) {
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        if (req == null || req.status() == null || req.status().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "status is required"));
+        }
+
+        TimeOffRequest.Status status = parseTimeOffStatus(req.status());
+        if (status == null || status == TimeOffRequest.Status.PENDING) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid status"));
+        }
+
+        Optional<TimeOffRequest> requestOpt = timeOffRequestRepository.findById(id);
+        if (requestOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Time off request not found"));
+        }
+
+        TimeOffRequest request = requestOpt.get();
+        if (request.getStatus() != TimeOffRequest.Status.PENDING) {
+            return ResponseEntity.status(409).body(Map.of("error", "Request already processed"));
+        }
+
+        request.setStatus(status);
+        if (status == TimeOffRequest.Status.APPROVED) {
+            request.setApprovedAt(OffsetDateTime.now());
+            if (auth.getPrincipal() instanceof UUID adminId) {
+                request.setApprovedBy(adminId);
+            }
+        }
+        if (req.reviewNotes() != null && !req.reviewNotes().isBlank()) {
+            String existing = request.getNotes() != null ? request.getNotes() + "\n\n" : "";
+            request.setNotes(existing + "Admin note: " + req.reviewNotes().trim());
+        }
+
+        TimeOffRequest saved = timeOffRequestRepository.save(request);
+        Profile profile = profileRepository.findById(saved.getEmployeeId()).orElse(null);
+        return ResponseEntity.ok(buildTimeOffResponse(saved, profile));
+    }
+
     // ==================== HELPER METHODS ====================
 
     private Map<String, Object> buildAttendanceResponse(Attendance a) {
@@ -873,7 +1061,11 @@ public class AttendanceController {
         response.put("check_in", a.getCheckIn());
         response.put("check_out", a.getCheckOut());
         response.put("date", a.getDate());
-        response.put("status", a.getStatus());
+        String status = a.getStatus();
+        if ("excused".equalsIgnoreCase(status)) {
+            status = "late";
+        }
+        response.put("status", status);
         response.put("location", a.getLocation());
         response.put("address", a.getAddress());
         response.put("latitude", a.getLatitude());
@@ -894,6 +1086,16 @@ public class AttendanceController {
         response.put("liveness_passed", a.getLivenessPassed());
         response.put("face_match_provider", a.getFaceMatchProvider());
         response.put("note", a.getNote());
+        Map<String, Object> photo = new LinkedHashMap<>();
+        photo.put("url", a.getPhotoUrl());
+        photo.put("verification_status", a.getVerificationStatus());
+        photo.put("face_match_score", a.getFaceMatchScore());
+        photo.put("face_match_provider", a.getFaceMatchProvider());
+        photo.put("liveness_score", a.getLivenessScore());
+        photo.put("liveness_type", a.getLivenessType());
+        photo.put("liveness_passed", a.getLivenessPassed());
+        photo.put("retention_until", a.getRetentionUntil());
+        response.put("photo", photo);
         return response;
     }
 
@@ -916,6 +1118,35 @@ public class AttendanceController {
             }
         }
         return response;
+    }
+
+    private Map<String, Object> buildTimeOffResponse(TimeOffRequest request, Profile profile) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", request.getId());
+        item.put("employeeId", request.getEmployeeId());
+        item.put("employeeName", profile != null ? profile.getFullName() : null);
+        item.put("department", profile != null ? profile.getDepartment() : null);
+        item.put("type", request.getType());
+        item.put("startDate", request.getStartDate() != null ? request.getStartDate().toString() : null);
+        item.put("endDate", request.getEndDate() != null ? request.getEndDate().toString() : null);
+        item.put("notes", request.getNotes());
+        item.put("status", request.getStatus() != null ? request.getStatus().name().toLowerCase(Locale.ROOT) : null);
+        item.put("createdAt", request.getCreatedAt() != null ? request.getCreatedAt().toString() : null);
+        item.put("approvedAt", request.getApprovedAt() != null ? request.getApprovedAt().toString() : null);
+        item.put("approvedBy", request.getApprovedBy());
+        return item;
+    }
+
+    private TimeOffRequest.Status parseTimeOffStatus(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String value = raw.trim().toUpperCase(Locale.ROOT);
+        try {
+            return TimeOffRequest.Status.valueOf(value);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     private String getAvatarUrl(Profile p) {
@@ -1000,6 +1231,21 @@ public class AttendanceController {
             String region,
             @JsonAlias({"is_paid", "isPaid"})
             Boolean isPaid
+    ) {}
+
+    public record TimeOffRequestPayload(
+            @JsonAlias({"start_date", "startDate"})
+            String startDate,
+            @JsonAlias({"end_date", "endDate"})
+            String endDate,
+            String type,
+            String notes
+    ) {}
+
+    public record TimeOffDecision(
+            String status,
+            @JsonAlias({"review_notes", "reviewNotes"})
+            String reviewNotes
     ) {}
 
 }
