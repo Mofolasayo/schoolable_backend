@@ -3,6 +3,8 @@ package com.schoolable.backend.hr;
 import com.schoolable.backend.audit.AuditService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class HRManagementService {
+
+    private static final Logger log = LoggerFactory.getLogger(HRManagementService.class);
 
     @Autowired
     private ProfileRepository profileRepository;
@@ -349,15 +353,26 @@ public class HRManagementService {
                 throw new IllegalArgumentException("Team already exists");
             });
 
+        UUID actorId = createdBy;
+        if (actorId != null && !profileRepository.existsById(actorId)) {
+            log.warn("Team create requested by non-profile actorId {}, storing null createdBy", actorId);
+            actorId = null;
+        }
+
         Team team = new Team();
         team.setName(name.trim());
         team.setDescription(description);
         team.setIsActive(true);
-        team.setCreatedBy(createdBy);
+        team.setCreatedBy(actorId);
 
-        Team saved = teamRepository.save(team);
-        auditService.logCreate("TEAM", saved.getId().toString(), createdBy);
-        return saved;
+        try {
+            Team saved = teamRepository.save(team);
+            auditService.logCreate("TEAM", saved.getId().toString(), actorId);
+            return saved;
+        } catch (Exception e) {
+            log.error("Failed to create team {}", name, e);
+            throw e;
+        }
     }
 
     // =====================================================
