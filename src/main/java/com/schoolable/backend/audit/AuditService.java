@@ -11,6 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -36,6 +39,9 @@ public class AuditService {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     // Action constants
     public static final String ACTION_CREATE = "CREATE";
@@ -116,7 +122,7 @@ public class AuditService {
                 // Request context not available (e.g., async processing)
             }
 
-            auditLogRepository.save(log);
+            saveSafely(log);
         } catch (JsonProcessingException e) {
             // Log error but don't fail the main operation
             log.warn("Failed to create audit log: {}", e.getMessage());
@@ -132,16 +138,17 @@ public class AuditService {
             log.setEntityType(entityType);
             log.setEntityId(entityId);
             log.setAction(ACTION_CREATE);
-            log.setActorId(actorId);
-            
-            Optional<Profile> profile = profileRepository.findById(actorId);
-            profile.ifPresent(p -> {
-                log.setActorName(p.getFullName());
-                log.setActorEmail(p.getEmail());
-            });
+            if (actorId != null) {
+                log.setActorId(actorId);
+                Optional<Profile> profile = profileRepository.findById(actorId);
+                profile.ifPresent(p -> {
+                    log.setActorName(p.getFullName());
+                    log.setActorEmail(p.getEmail());
+                });
+            }
 
             captureRequestMetadata(log);
-            auditLogRepository.save(log);
+            saveSafely(log);
         } catch (Exception e) {
             log.warn("Failed to create audit log: {}", e.getMessage());
         }
@@ -156,20 +163,21 @@ public class AuditService {
             log.setEntityType(entityType);
             log.setEntityId(entityId);
             log.setAction(ACTION_UPDATE);
-            log.setActorId(actorId);
-            
-            Optional<Profile> profile = profileRepository.findById(actorId);
-            profile.ifPresent(p -> {
-                log.setActorName(p.getFullName());
-                log.setActorEmail(p.getEmail());
-            });
+            if (actorId != null) {
+                log.setActorId(actorId);
+                Optional<Profile> profile = profileRepository.findById(actorId);
+                profile.ifPresent(p -> {
+                    log.setActorName(p.getFullName());
+                    log.setActorEmail(p.getEmail());
+                });
+            }
 
             if (changes != null && !changes.isEmpty()) {
                 log.setChanges(objectMapper.writeValueAsString(changes));
             }
 
             captureRequestMetadata(log);
-            auditLogRepository.save(log);
+            saveSafely(log);
         } catch (Exception e) {
             log.warn("Failed to create audit log: {}", e.getMessage());
         }
@@ -210,7 +218,7 @@ public class AuditService {
                 // Request context not available
             }
 
-            auditLogRepository.save(log);
+            saveSafely(log);
         } catch (Exception e) {
             log.warn("Failed to create audit log: {}", e.getMessage());
         }
@@ -259,9 +267,19 @@ public class AuditService {
                 // Request context not available
             }
 
-            auditLogRepository.save(log);
+            saveSafely(log);
         } catch (JsonProcessingException e) {
             log.warn("Failed to create audit log: {}", e.getMessage());
+        }
+    }
+
+    private void saveSafely(AuditLog logEntry) {
+        try {
+            TransactionTemplate template = new TransactionTemplate(transactionManager);
+            template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            template.executeWithoutResult(status -> auditLogRepository.save(logEntry));
+        } catch (Exception e) {
+            log.warn("Failed to persist audit log: {}", e.getMessage());
         }
     }
 
