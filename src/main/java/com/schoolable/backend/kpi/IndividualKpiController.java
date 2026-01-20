@@ -258,7 +258,7 @@ public class IndividualKpiController {
         }
 
         IndividualKpi kpi = kpiOpt.get();
-        if (!kpi.getSetById().equals(userId)) {
+        if (!kpi.getSetById().equals(userId) && !isAdmin(auth)) {
             return ResponseEntity.status(403).body(Map.of("error", "You can only edit KPIs you created"));
         }
 
@@ -329,7 +329,7 @@ public class IndividualKpiController {
         }
 
         IndividualKpi kpi = kpiOpt.get();
-        if (!kpi.getSetById().equals(userId)) {
+        if (!kpi.getSetById().equals(userId) && !isAdmin(auth)) {
             return ResponseEntity.status(403).body(Map.of("error", "You can only delete KPIs you created"));
         }
 
@@ -364,6 +364,58 @@ public class IndividualKpiController {
         Integer totalWeight = individualKpiRepository.getTotalWeight(userId, q, y);
 
         return ResponseEntity.ok(Map.of(
+            "quarter", q,
+            "year", y,
+            "kpis", kpis.stream().map(this::toDto).collect(Collectors.toList()),
+            "totalWeight", totalWeight != null ? totalWeight : 0,
+            "averageAchievement", avgAchievement != null ? avgAchievement : 0
+        ));
+    }
+
+    @Operation(summary = "Get individual KPIs for an employee")
+    @GetMapping("/employee/{employeeId}")
+    public ResponseEntity<?> getEmployeeKpis(
+            Authentication auth,
+            @PathVariable String employeeId,
+            @RequestParam(required = false) String quarter,
+            @RequestParam(required = false) Integer year
+    ) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
+        }
+
+        UUID userId = (UUID) auth.getPrincipal();
+        UUID targetId;
+        try {
+            targetId = UUID.fromString(employeeId);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid employeeId"));
+        }
+
+        Profile targetProfile = profileRepository.findById(targetId).orElse(null);
+        if (targetProfile == null) {
+            return ResponseEntity.status(404).body(Map.of("error", "Employee not found"));
+        }
+
+        if (!isAdmin(auth)) {
+            Profile requester = profileRepository.findById(userId).orElse(null);
+            boolean isTeamLead = requester != null && Boolean.TRUE.equals(requester.getIsTeamLead());
+            boolean sameDept = requester != null && requester.getDepartment() != null
+                && requester.getDepartment().equals(targetProfile.getDepartment());
+            if (!isTeamLead || !sameDept) {
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
+            }
+        }
+
+        String q = quarter != null ? quarter : getCurrentQuarter();
+        int y = year != null ? year : LocalDate.now().getYear();
+
+        List<IndividualKpi> kpis = individualKpiRepository.findActiveByEmployeeAndPeriod(targetId, q, y);
+        Double avgAchievement = individualKpiRepository.getAverageAchievement(targetId, q, y);
+        Integer totalWeight = individualKpiRepository.getTotalWeight(targetId, q, y);
+
+        return ResponseEntity.ok(Map.of(
+            "employeeId", targetId.toString(),
             "quarter", q,
             "year", y,
             "kpis", kpis.stream().map(this::toDto).collect(Collectors.toList()),

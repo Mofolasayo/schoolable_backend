@@ -1,7 +1,9 @@
 package com.schoolable.backend.task;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import com.schoolable.backend.storage.StorageService;
 import com.schoolable.backend.websocket.WebSocketMessageController;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -10,11 +12,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -33,6 +37,8 @@ public class TaskController {
     private final TaskAssigneeRepository taskAssigneeRepository;
     private final ProfileRepository profileRepository;
     private final WebSocketMessageController webSocketController;
+    private final StorageService storageService;
+    private final ObjectMapper objectMapper;
 
     public TaskController(
             TaskRepository taskRepository,
@@ -41,7 +47,9 @@ public class TaskController {
             TaskAttachmentRepository attachmentRepository,
             TaskAssigneeRepository taskAssigneeRepository,
             ProfileRepository profileRepository,
-            WebSocketMessageController webSocketController) {
+            WebSocketMessageController webSocketController,
+            StorageService storageService,
+            ObjectMapper objectMapper) {
         this.taskRepository = taskRepository;
         this.subtaskRepository = subtaskRepository;
         this.commentRepository = commentRepository;
@@ -49,6 +57,8 @@ public class TaskController {
         this.taskAssigneeRepository = taskAssigneeRepository;
         this.profileRepository = profileRepository;
         this.webSocketController = webSocketController;
+        this.storageService = storageService;
+        this.objectMapper = objectMapper;
     }
 
     @Operation(summary = "Get all tasks with related data")
@@ -228,9 +238,29 @@ public class TaskController {
     }
 
     @Operation(summary = "Create a new task")
-    @PostMapping
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     @Transactional
     public ResponseEntity<?> createTask(@RequestBody CreateTaskRequest req, Authentication auth) {
+        return createTaskInternal(req, auth, List.of());
+    }
+
+    @Operation(summary = "Create a task with attachments (multipart)")
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
+    public ResponseEntity<?> createTaskWithAttachments(
+            @RequestPart("task") String taskPayload,
+            @RequestPart(value = "files", required = false) List<MultipartFile> files,
+            Authentication auth) {
+        CreateTaskRequest req;
+        try {
+            req = objectMapper.readValue(taskPayload, CreateTaskRequest.class);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid task payload"));
+        }
+        return createTaskInternal(req, auth, files);
+    }
+
+    private ResponseEntity<?> createTaskInternal(CreateTaskRequest req, Authentication auth, List<MultipartFile> files) {
         if (auth == null || auth.getPrincipal() == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
         }
@@ -280,6 +310,10 @@ public class TaskController {
             task.setIsRecurringInstance(req.isRecurringInstance());
         }
 
+        if (files != null && !files.isEmpty() && !storageService.isAvailable()) {
+            return ResponseEntity.status(503).body(Map.of("error", "Storage service not configured"));
+        }
+
         task = taskRepository.save(task);
 
         if (!assigneeIds.isEmpty()) {
@@ -313,8 +347,42 @@ public class TaskController {
             }
         }
 
+        List<String> attachmentErrors = new ArrayList<>();
+        if (files != null && !files.isEmpty()) {
+            for (MultipartFile file : files) {
+                if (file == null || file.isEmpty()) {
+                    attachmentErrors.add("Empty attachment skipped");
+                    continue;
+                }
+                if (file.getSize() > 10 * 1024 * 1024) {
+                    attachmentErrors.add((file.getOriginalFilename() != null ? file.getOriginalFilename() : "File") + ": File exceeds 10MB limit");
+                    continue;
+                }
+                try {
+                    Map<String, Object> uploadResult = storageService.uploadTaskAttachment(file, task.getId());
+                    TaskAttachment attachment = new TaskAttachment();
+                    attachment.setTaskId(task.getId());
+                    String originalName = (String) uploadResult.get("originalFilename");
+                    attachment.setFileName(originalName != null ? originalName : file.getOriginalFilename());
+                    Object size = uploadResult.get("size");
+                    attachment.setFileSize(size != null ? String.valueOf(size) : String.valueOf(file.getSize()));
+                    attachment.setFileType(file.getContentType() != null ? file.getContentType() : String.valueOf(uploadResult.getOrDefault("format", "")));
+                    attachment.setFileUrl(String.valueOf(uploadResult.get("url")));
+                    attachment.setFilePath(String.valueOf(uploadResult.get("publicId")));
+                    attachment.setCreatedAt(OffsetDateTime.now());
+                    attachmentRepository.save(attachment);
+                } catch (Exception e) {
+                    log.warn("Failed to upload task attachment: {}", file.getOriginalFilename(), e);
+                    attachmentErrors.add((file.getOriginalFilename() != null ? file.getOriginalFilename() : "File") + ": Upload failed");
+                }
+            }
+        }
+
         // Broadcast task creation via WebSocket
         Map<String, Object> taskResponse = buildTaskResponse(task);
+        if (!attachmentErrors.isEmpty()) {
+            taskResponse.put("attachment_errors", attachmentErrors);
+        }
         webSocketController.broadcastTaskUpdate("created", task.getId(), taskResponse);
 
         return ResponseEntity.ok(taskResponse);
@@ -563,7 +631,7 @@ public class TaskController {
             return ResponseEntity.status(404).body(Map.of("error", "Task not found"));
         }
         UUID userId = (UUID) auth.getPrincipal();
-        if (!canManageTask(userId, auth, taskOpt.get())) {
+        if (!canUpdateTaskProgress(userId, auth, taskOpt.get())) {
             return ResponseEntity.status(403).body(Map.of("error", "Unauthorized"));
         }
         subtask.setCompleted(req.completed());
@@ -646,7 +714,8 @@ public class TaskController {
                 "name", attachment.getFileName(),
                 "size", attachment.getFileSize(),
                 "type", attachment.getFileType(),
-                "url", attachment.getFileUrl()
+                "url", attachment.getFileUrl(),
+                "path", attachment.getFilePath()
         ));
     }
 
@@ -912,7 +981,8 @@ public class TaskController {
                 "file_name", a.getFileName() != null ? a.getFileName() : "",
                 "file_size", a.getFileSize() != null ? a.getFileSize() : "",
                 "file_type", a.getFileType() != null ? a.getFileType() : "",
-                "file_url", a.getFileUrl() != null ? a.getFileUrl() : ""
+                "file_url", a.getFileUrl() != null ? a.getFileUrl() : "",
+                "file_path", a.getFilePath() != null ? a.getFilePath() : ""
         )).toList());
 
         return response;

@@ -45,13 +45,22 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     steps:
+      - name: Prepare SSH key
+        run: |
+          if [ -n "${{ secrets.DROPLET_SSH_KEY_B64 }}" ]; then
+            echo "${{ secrets.DROPLET_SSH_KEY_B64 }}" | base64 -d > /tmp/droplet_key
+          else
+            echo "${{ secrets.DROPLET_SSH_KEY }}" > /tmp/droplet_key
+          fi
+          chmod 600 /tmp/droplet_key
       - name: Deploy on droplet
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DROPLET_HOST }}
           username: ${{ secrets.DROPLET_USER }}
-          key: ${{ secrets.DROPLET_SSH_KEY }}
+          key_path: /tmp/droplet_key
           script: |
             cd ~/schoolable_backend
             set -a && . .kamal/secrets && set +a
+            export KAMAL_SSH_KEY=~/.ssh/kamal_self
             kamal deploy --skip-push --version latest

@@ -669,6 +669,7 @@ public class KpiController {
     private Map<String, Object> formatScore(TeamQuarterlyScore score) {
         Map<String, Object> formatted = new HashMap<>();
         formatted.put("id", score.getId());
+        formatted.put("teamLeadId", score.getTeamLeadId());
         formatted.put("teamName", score.getTeamName());
         formatted.put("department", score.getDepartment());
         formatted.put("quarter", score.getQuarter());

@@ -102,7 +102,7 @@ public class HRManagementController {
             Authentication auth,
             @RequestBody Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         UUID employeeId = UUID.fromString((String) request.get("employeeId"));
         String teamName = (String) request.get("teamName");
 
@@ -138,7 +138,7 @@ public class HRManagementController {
             @PathVariable UUID employeeId,
             @RequestBody(required = false) Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         String teamName = request != null ? (String) request.get("teamName") : null;
 
         try {
@@ -165,7 +165,7 @@ public class HRManagementController {
             @PathVariable UUID employeeId,
             @RequestBody Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         String reason = request != null ? (String) request.get("reason") : null;
 
         try {
@@ -202,7 +202,7 @@ public class HRManagementController {
             Authentication auth,
             @RequestBody Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         String name = request.get("name") != null ? request.get("name").toString() : null;
         String description = request.get("description") != null ? request.get("description").toString() : null;
 
@@ -249,7 +249,7 @@ public class HRManagementController {
             Authentication auth,
             @RequestBody Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         UUID employeeId = UUID.fromString((String) request.get("employeeId"));
         LocalDate startDate = LocalDate.parse((String) request.get("startDate"));
         int months = request.get("probationMonths") != null ? 
@@ -281,7 +281,7 @@ public class HRManagementController {
             @PathVariable UUID id,
             @RequestBody Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         BigDecimal score = new BigDecimal(request.get("score").toString());
         String recommendation = (String) request.get("recommendation");
         String notes = (String) request.get("notes");
@@ -310,7 +310,7 @@ public class HRManagementController {
             Authentication auth,
             @PathVariable UUID id
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
 
         try {
             hrService.confirmEmployee(id, userId);
@@ -354,7 +354,7 @@ public class HRManagementController {
             Authentication auth,
             @RequestBody Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         UUID employeeId = UUID.fromString((String) request.get("employeeId"));
         String reason = (String) request.get("reason");
         BigDecimal triggerScore = request.get("triggerScore") != null ?
@@ -388,7 +388,7 @@ public class HRManagementController {
             @PathVariable Long id,
             @RequestBody Map<String, Object> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         BigDecimal finalScore = new BigDecimal(request.get("finalScore").toString());
         String notes = (String) request.get("notes");
         String outcome = (String) request.get("outcome");
@@ -507,7 +507,7 @@ public class HRManagementController {
             @PathVariable Long id,
             @RequestBody Map<String, String> request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         String status = request.get("status");
         String notes = request.get("notes");
 
@@ -556,5 +556,16 @@ public class HRManagementController {
         dto.put("status", profile.getStatus());
         dto.put("avatar", "https://api.dicebear.com/7.x/avataaars/svg?seed=" + profile.getId());
         return dto;
+    }
+
+    private UUID getUserId(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            throw new IllegalStateException("Unauthenticated");
+        }
+        Object principal = auth.getPrincipal();
+        if (principal instanceof UUID) {
+            return (UUID) principal;
+        }
+        return UUID.fromString(principal.toString());
     }
 }

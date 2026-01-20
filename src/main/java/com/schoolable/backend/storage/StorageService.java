@@ -1,6 +1,7 @@
 package com.schoolable.backend.storage;
 
 import com.cloudinary.Cloudinary;
+import com.cloudinary.Transformation;
 import com.cloudinary.utils.ObjectUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -250,17 +251,18 @@ public class StorageService {
 
         String uniqueId = "checkin_" + userId + "_" + System.currentTimeMillis();
 
+        Transformation transformation = new Transformation()
+            .width(1200)
+            .height(1200)
+            .crop("limit")
+            .quality("auto:good")
+            .fetchFormat("webp");
+
         Map<String, Object> options = ObjectUtils.asMap(
             "folder", "schoolable/attendance",
             "public_id", uniqueId,
             "resource_type", "image",
-            "transformation", ObjectUtils.asMap(
-                "width", 1200,
-                "height", 1200,
-                "crop", "limit",
-                "quality", "auto:good",
-                "fetch_format", "webp"
-            )
+            "transformation", transformation
         );
 
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), options);
@@ -311,18 +313,19 @@ public class StorageService {
             throw new IllegalStateException("Cloudinary is not configured");
         }
 
+        Transformation transformation = new Transformation()
+            .width(300)
+            .height(300)
+            .crop("fill")
+            .gravity("face")
+            .quality("auto:good");
+
         Map<String, Object> options = ObjectUtils.asMap(
             "folder", "schoolable/avatars",
             "public_id", "avatar_" + userId,
             "resource_type", "image",
             "overwrite", true,
-            "transformation", ObjectUtils.asMap(
-                "width", 300,
-                "height", 300,
-                "crop", "fill",
-                "gravity", "face",
-                "quality", "auto:good"
-            )
+            "transformation", transformation
         );
 
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), options);
@@ -399,16 +402,17 @@ public class StorageService {
         
         // Apply transformations for images, store raw for other files
         if (contentType != null && contentType.startsWith("image/")) {
+            Transformation transformation = new Transformation()
+                .width(1920)
+                .height(1080)
+                .crop("limit")
+                .quality("auto:good");
+
             options = ObjectUtils.asMap(
                 "folder", "schoolable/chat/" + channelId,
                 "public_id", uniqueId,
                 "resource_type", "image",
-                "transformation", ObjectUtils.asMap(
-                    "width", 1920,
-                    "height", 1080,
-                    "crop", "limit",
-                    "quality", "auto:good"
-                )
+                "transformation", transformation
             );
         } else {
             options = ObjectUtils.asMap(
@@ -445,17 +449,18 @@ public class StorageService {
 
         String uniqueId = "announcement_" + announcementId + "_" + System.currentTimeMillis();
 
+        Transformation transformation = new Transformation()
+            .width(1200)
+            .height(630)
+            .crop("limit")
+            .quality("auto:good")
+            .fetchFormat("auto");
+
         Map<String, Object> options = ObjectUtils.asMap(
             "folder", "schoolable/announcements",
             "public_id", uniqueId,
             "resource_type", "image",
-            "transformation", ObjectUtils.asMap(
-                "width", 1200,
-                "height", 630,
-                "crop", "limit",
-                "quality", "auto:good",
-                "fetch_format", "auto"
-            )
+            "transformation", transformation
         );
 
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), options);
