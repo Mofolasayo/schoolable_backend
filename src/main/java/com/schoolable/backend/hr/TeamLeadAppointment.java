@@ -1,6 +1,8 @@
 package com.schoolable.backend.hr;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -52,7 +54,8 @@ public class TeamLeadAppointment {
     @Column(name = "current_cgpa", precision = 3, scale = 2)
     private BigDecimal currentCgpa;
     
-    @Column(columnDefinition = "JSONB DEFAULT '[]'")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
     private String perks; // JSON array: ["workspace", "data_allowance", "retreat", etc.]
     
     @Column(name = "ended_at")
