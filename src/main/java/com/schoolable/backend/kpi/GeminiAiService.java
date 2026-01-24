@@ -289,6 +289,22 @@ public class GeminiAiService {
             PROMPT_VERSION_DAILY_REPORT,
             jobId
         );
+        if (aiResponse.text() == null || aiResponse.text().isBlank()) {
+            DailyReportGradingResult result = buildManualDailyReportFallback(
+                tasksCompleted,
+                tasksInProgress,
+                blockers,
+                plannedForTomorrow,
+                additionalNotes,
+                individualKpis
+            );
+            result.promptVersion = PROMPT_VERSION_DAILY_REPORT;
+            result.modelUsed = aiResponse.modelUsed();
+            result.requestId = aiResponse.requestId();
+            result.cacheHit = aiResponse.cacheHit();
+            return result;
+        }
+
         DailyReportGradingResult result = parseDailyReportGradingResponse(aiResponse.text());
         result.promptVersion = PROMPT_VERSION_DAILY_REPORT;
         result.modelUsed = aiResponse.modelUsed();
@@ -1271,30 +1287,188 @@ public class GeminiAiService {
      * Calculate score manually if AI fails
      */
     private BigDecimal calculateManualScore(List<KpiProgressData> kpiData) {
-        double totalScore = 0;
-        double totalWeight = 0;
+        double weighted = 0.0;
+        double totalWeight = 0.0;
 
         for (KpiProgressData kpi : kpiData) {
-            double progress = kpi.progressPercentage;
-            double kpiScore;
-
-            if (progress >= 100) kpiScore = 100;
-            else if (progress >= 90) kpiScore = 90;
-            else if (progress >= 80) kpiScore = 80;
-            else if (progress >= 70) kpiScore = 70;
-            else if (progress >= 60) kpiScore = 60;
-            else kpiScore = 20;
-
-            totalScore += kpiScore * (kpi.weight / 100.0);
-            totalWeight += kpi.weight;
+            double weight = kpi.weight;
+            if (weight <= 0) {
+                continue;
+            }
+            double progress = Math.max(0.0, Math.min(100.0, kpi.progressPercentage));
+            weighted += progress * weight;
+            totalWeight += weight;
         }
 
-        // Normalize if weights don't sum to 100
-        if (totalWeight > 0 && totalWeight != 100) {
-            totalScore = totalScore * (100.0 / totalWeight);
+        if (totalWeight <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         }
 
-        return BigDecimal.valueOf(totalScore).setScale(2, RoundingMode.HALF_UP);
+        double score = weighted / totalWeight;
+        return BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private DailyReportGradingResult buildManualDailyReportFallback(
+            String tasksCompleted,
+            String tasksInProgress,
+            String blockers,
+            String plannedForTomorrow,
+            String additionalNotes,
+            List<String> individualKpis) {
+        DailyReportGradingResult result = new DailyReportGradingResult();
+
+        String completed = safeText(tasksCompleted);
+        String inProgress = safeText(tasksInProgress);
+        String blockersText = safeText(blockers);
+        String planned = safeText(plannedForTomorrow);
+        String notes = safeText(additionalNotes);
+
+        String reportText = String.join(" ",
+            completed, inProgress, blockersText, planned, notes).trim().toLowerCase(Locale.ROOT);
+
+        int contentLength = completed.length()
+            + inProgress.length()
+            + blockersText.length()
+            + planned.length()
+            + notes.length();
+
+        BigDecimal clarityScore = BigDecimal.valueOf(scoreByLength(contentLength, 25, 40, 55, 70, 85));
+        BigDecimal productivityScore = BigDecimal.valueOf(scoreByTaskCount(completed, inProgress));
+        BigDecimal kpiAlignmentScore = BigDecimal.valueOf(
+            computeKpiAlignmentScore(reportText, individualKpis));
+
+        BigDecimal overallScore = clarityScore
+            .multiply(BigDecimal.valueOf(0.35))
+            .add(productivityScore.multiply(BigDecimal.valueOf(0.35)))
+            .add(kpiAlignmentScore.multiply(BigDecimal.valueOf(0.30)))
+            .setScale(2, RoundingMode.HALF_UP);
+
+        result.overallScore = overallScore;
+        result.clarityScore = clarityScore;
+        result.productivityScore = productivityScore;
+        result.kpiAlignmentScore = kpiAlignmentScore;
+        result.feedback = "AI grading is unavailable. Scores reflect report detail and KPI keyword alignment.";
+        result.strengths = List.of("Report submitted on time");
+        result.improvements = List.of(
+            "Reference specific KPI outcomes in your updates",
+            "Include measurable results where possible"
+        );
+        result.suggestionsForTomorrow = List.of(
+            "Align tasks with your highest-weight KPIs",
+            "Document progress against KPI targets"
+        );
+        result.auraBoostTips = List.of(
+            "Complete high-impact tasks tied to your KPIs",
+            "Share concrete results in daily reports"
+        );
+
+        return result;
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private int scoreByLength(int length, int min, int low, int mid, int high, int max) {
+        if (length >= 400) return max;
+        if (length >= 250) return high;
+        if (length >= 120) return mid;
+        if (length >= 60) return low;
+        return min;
+    }
+
+    private int scoreByTaskCount(String completed, String inProgress) {
+        int count = countTaskFragments(completed) + countTaskFragments(inProgress);
+        if (count <= 0) return 20;
+        return Math.min(95, 25 + (count * 10));
+    }
+
+    private int countTaskFragments(String value) {
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        String[] parts = value.split("[\\n\\r,;•\\-]+");
+        int count = 0;
+        for (String part : parts) {
+            if (!part.trim().isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private double computeKpiAlignmentScore(String reportText, List<String> kpis) {
+        if (reportText == null || reportText.isBlank() || kpis == null || kpis.isEmpty()) {
+            return 0.0;
+        }
+
+        double matchedWeight = 0.0;
+        double totalWeight = 0.0;
+
+        for (String entry : kpis) {
+            if (entry == null || entry.isBlank()) {
+                continue;
+            }
+            String name = entry;
+            int paren = entry.indexOf(" (");
+            if (paren > 0) {
+                name = entry.substring(0, paren).trim();
+            }
+            double weight = extractWeight(entry);
+            totalWeight += weight;
+
+            if (matchesKpi(reportText, name)) {
+                matchedWeight += weight;
+            }
+        }
+
+        if (totalWeight <= 0.0) {
+            return 0.0;
+        }
+
+        double score = (matchedWeight / totalWeight) * 100.0;
+        return Math.max(0.0, Math.min(100.0, score));
+    }
+
+    private boolean matchesKpi(String reportText, String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+
+        String[] tokens = name.toLowerCase(Locale.ROOT).split("[^a-z0-9]+");
+        for (String token : tokens) {
+            if (token.length() < 3) {
+                continue;
+            }
+            if (reportText.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private double extractWeight(String entry) {
+        if (entry == null) {
+            return 1.0;
+        }
+        int idx = entry.toLowerCase(Locale.ROOT).lastIndexOf("weight:");
+        if (idx < 0) {
+            return 1.0;
+        }
+        String tail = entry.substring(idx + 7).trim();
+        int pct = tail.indexOf('%');
+        if (pct > 0) {
+            tail = tail.substring(0, pct);
+        }
+        String digits = tail.replaceAll("[^0-9]", "");
+        if (digits.isEmpty()) {
+            return 1.0;
+        }
+        try {
+            return Double.parseDouble(digits);
+        } catch (NumberFormatException e) {
+            return 1.0;
+        }
     }
 
     private record GeminiResponse(String text, String modelUsed, UUID requestId, boolean cacheHit) {}

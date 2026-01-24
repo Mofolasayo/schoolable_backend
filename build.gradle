@@ -48,11 +48,17 @@ dependencies {
     // WebClient for async HTTP calls (AI integration)
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
+    // Firebase Admin SDK (FCM HTTP v1)
+    implementation 'com.google.firebase:firebase-admin:9.2.0'
+
     // AWS Rekognition for face match
     implementation platform('software.amazon.awssdk:bom:2.25.61')
     implementation 'software.amazon.awssdk:rekognition'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'org.testcontainers:junit-jupiter:1.20.3'
+    testImplementation 'org.testcontainers:postgresql:1.20.3'
 }
 
 tasks.named('test') {

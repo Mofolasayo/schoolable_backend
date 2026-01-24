@@ -1,6 +1,7 @@
 package com.schoolable.backend.attendance;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.schoolable.backend.notification.NotificationService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,6 +31,7 @@ public class AttendanceController {
     private final FaceMatchService faceMatchService;
     private final HolidayCalendarRepository holidayCalendarRepository;
     private final TimeOffRequestRepository timeOffRequestRepository;
+    private final NotificationService notificationService;
 
     public AttendanceController(
             AttendanceRepository attendanceRepository,
@@ -39,7 +41,8 @@ public class AttendanceController {
             BiometricConsentRepository biometricConsentRepository,
             FaceMatchService faceMatchService,
             HolidayCalendarRepository holidayCalendarRepository,
-            TimeOffRequestRepository timeOffRequestRepository) {
+            TimeOffRequestRepository timeOffRequestRepository,
+            NotificationService notificationService) {
         this.attendanceRepository = attendanceRepository;
         this.officeLocationRepository = officeLocationRepository;
         this.profileRepository = profileRepository;
@@ -48,6 +51,7 @@ public class AttendanceController {
         this.faceMatchService = faceMatchService;
         this.holidayCalendarRepository = holidayCalendarRepository;
         this.timeOffRequestRepository = timeOffRequestRepository;
+        this.notificationService = notificationService;
     }
 
     // ==================== CHECK-IN ====================
@@ -934,6 +938,9 @@ public class AttendanceController {
 
         TimeOffRequest saved = timeOffRequestRepository.save(request);
         Profile profile = profileRepository.findById(userId).orElse(null);
+
+        notifyAdminsTimeOffRequest(saved, profile);
+
         return ResponseEntity.ok(buildTimeOffResponse(saved, profile));
     }
 
@@ -1049,6 +1056,9 @@ public class AttendanceController {
 
         TimeOffRequest saved = timeOffRequestRepository.save(request);
         Profile profile = profileRepository.findById(saved.getEmployeeId()).orElse(null);
+
+        notifyEmployeeTimeOffDecision(saved, profile);
+
         return ResponseEntity.ok(buildTimeOffResponse(saved, profile));
     }
 
@@ -1175,6 +1185,75 @@ public class AttendanceController {
         if (auth == null) return false;
         return auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"))
             || auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
+    }
+
+    private void notifyAdminsTimeOffRequest(TimeOffRequest request, Profile profile) {
+        List<UUID> adminIds = profileRepository.findAll().stream()
+            .filter(p -> isAdminRole(p.getRole()))
+            .filter(p -> isActiveStatus(p.getStatus()))
+            .map(Profile::getId)
+            .toList();
+
+        if (adminIds.isEmpty()) {
+            return;
+        }
+
+        String title = "Leave Request";
+        String requester = profile != null && profile.getFullName() != null ? profile.getFullName() : "An employee";
+        String body = requester + " submitted a leave request.";
+        Map<String, Object> data = new HashMap<>();
+        data.put("requestId", request.getId().toString());
+        data.put("action", "review_leave");
+
+        notificationService.sendToUsers(
+            adminIds,
+            title,
+            body,
+            "LEAVE",
+            request.getId().toString(),
+            data
+        );
+    }
+
+    private void notifyEmployeeTimeOffDecision(TimeOffRequest request, Profile profile) {
+        if (request.getEmployeeId() == null || request.getStatus() == null) {
+            return;
+        }
+
+        String title = "Leave Update";
+        String status = request.getStatus().name().toLowerCase(Locale.ROOT);
+        String body = "Your leave request was " + status + ".";
+        Map<String, Object> data = new HashMap<>();
+        data.put("requestId", request.getId().toString());
+        data.put("action", "open_leave");
+
+        notificationService.sendToUser(
+            request.getEmployeeId(),
+            title,
+            body,
+            "LEAVE",
+            request.getId().toString(),
+            data
+        );
+    }
+
+    private boolean isAdminRole(String role) {
+        if (role == null) {
+            return false;
+        }
+        String normalized = role.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("admin")
+            || normalized.equals("super_admin")
+            || normalized.equals("super admin")
+            || normalized.equals("superadmin");
+    }
+
+    private boolean isActiveStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return true;
+        }
+        String normalized = status.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("active") || normalized.equals("approved");
     }
 
     private String normalizeString(String value) {

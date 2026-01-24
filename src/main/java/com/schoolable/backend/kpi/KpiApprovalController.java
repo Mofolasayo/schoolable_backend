@@ -1,5 +1,6 @@
 package com.schoolable.backend.kpi;
 
+import com.schoolable.backend.notification.NotificationService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,6 +36,9 @@ public class KpiApprovalController {
 
     @Autowired
     private KpiHistoryRepository kpiHistoryRepository;
+
+    @Autowired
+    private NotificationService notificationService;
 
     /**
      * Get all KPIs pending approval
@@ -97,6 +101,8 @@ public class KpiApprovalController {
         logKpiChange(kpi.getId(), "individual", userId, 
             "DRAFT", "PENDING_APPROVAL", "Submitted for approval");
 
+        notifyAdminsKpiSubmission(kpi);
+
         return ResponseEntity.ok(buildKpiResponse(kpi));
     }
 
@@ -128,6 +134,8 @@ public class KpiApprovalController {
         // Log the approval
         logKpiChange(kpi.getId(), "individual", approverId, 
             previousStatus, "ACTIVE", "Approved by admin");
+
+        notifyKpiDecision(kpi, "approved");
 
         return ResponseEntity.ok(Map.of(
             "message", "KPI approved successfully",
@@ -171,6 +179,8 @@ public class KpiApprovalController {
         // Log the rejection
         logKpiChange(kpi.getId(), "individual", approverId, 
             previousStatus, "REJECTED", "Rejected: " + req.reason);
+
+        notifyKpiDecision(kpi, "rejected");
 
         return ResponseEntity.ok(Map.of(
             "message", "KPI rejected",
@@ -331,5 +341,71 @@ public class KpiApprovalController {
 
     public static class BulkApprovalRequest {
         public List<UUID> kpiIds;
+    }
+
+    private void notifyAdminsKpiSubmission(IndividualKpi kpi) {
+        List<UUID> adminIds = profileRepository.findAll().stream()
+            .filter(profile -> isAdminRole(profile.getRole()))
+            .filter(profile -> isActiveStatus(profile.getStatus()))
+            .map(Profile::getId)
+            .toList();
+
+        if (adminIds.isEmpty()) {
+            return;
+        }
+
+        String title = "KPI Approval";
+        String body = "A KPI is awaiting approval.";
+        Map<String, Object> data = new HashMap<>();
+        data.put("kpiId", kpi.getId().toString());
+        data.put("action", "review_kpi");
+
+        notificationService.sendToUsers(
+            adminIds,
+            title,
+            body,
+            NotificationService.TYPE_PERFORMANCE,
+            kpi.getId().toString(),
+            data
+        );
+    }
+
+    private void notifyKpiDecision(IndividualKpi kpi, String decision) {
+        if (kpi.getEmployeeId() == null) {
+            return;
+        }
+        String title = "KPI Update";
+        String body = "Your KPI was " + decision + ".";
+        Map<String, Object> data = new HashMap<>();
+        data.put("kpiId", kpi.getId().toString());
+        data.put("action", "open_kpi");
+
+        notificationService.sendToUser(
+            kpi.getEmployeeId(),
+            title,
+            body,
+            NotificationService.TYPE_PERFORMANCE,
+            kpi.getId().toString(),
+            data
+        );
+    }
+
+    private boolean isAdminRole(String role) {
+        if (role == null) {
+            return false;
+        }
+        String normalized = role.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("admin")
+            || normalized.equals("super_admin")
+            || normalized.equals("super admin")
+            || normalized.equals("superadmin");
+    }
+
+    private boolean isActiveStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return true;
+        }
+        String normalized = status.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("active") || normalized.equals("approved");
     }
 }

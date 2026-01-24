@@ -1,10 +1,12 @@
 spring:
+  config:
+    import: optional:file:.env[.properties]
   application:
     name: schoolable-backend
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/schoolable}
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:folasayo}
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: none
@@ -37,7 +39,7 @@ schoolable:
       enabled: false
 
 jwt:
-  secret: ${JWT_SECRET:super-secret-change-me-please-32bytes-minimum-1234567890}
+  secret: ${JWT_SECRET}
   expirationSeconds: 86400
 
 resend:

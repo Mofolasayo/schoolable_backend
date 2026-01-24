@@ -136,6 +136,7 @@ public class NativeWebSocketConfig implements WebSocketConfigurer {
                     // Auto-subscribe to task and announcement updates
                     sessionSubscriptions.get(session.getId()).add("/topic/tasks");
                     sessionSubscriptions.get(session.getId()).add("/topic/announcements");
+                    sessionSubscriptions.get(session.getId()).add("/topic/compliance");
                     
                     sendMessage(session, Map.of("type", "AUTH_SUCCESS", "userId", userId.toString()));
                     log.info("Native WS authenticated: {}", userId);

@@ -1,6 +1,8 @@
 package com.schoolable.backend.hr;
 
 import com.schoolable.backend.audit.AuditService;
+import com.schoolable.backend.kpi.TeamQuarterlyScore;
+import com.schoolable.backend.kpi.TeamQuarterlyScoreRepository;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import org.slf4j.Logger;
@@ -44,6 +46,9 @@ public class HRManagementService {
 
     @Autowired
     private AuditService auditService;
+
+    @Autowired
+    private TeamQuarterlyScoreRepository teamQuarterlyScoreRepository;
 
     // =====================================================
     // ORGANIZATIONAL STRUCTURE
@@ -173,6 +178,7 @@ public class HRManagementService {
             lead.put("monthsAsLead", appointment.getMonthsAsTeamLead());
             lead.put("requestStatus", employee.getTeamLeadRequestStatus());
             lead.put("requestedAt", employee.getTeamLeadRequestedAt());
+            lead.put("teamScore", getCurrentTeamScore(employee.getId()));
             
             result.add(lead);
         }
@@ -191,6 +197,7 @@ public class HRManagementService {
                 lead.put("reviewCycles", 0);
                 lead.put("requestStatus", profile.getTeamLeadRequestStatus());
                 lead.put("requestedAt", profile.getTeamLeadRequestedAt());
+                lead.put("teamScore", getCurrentTeamScore(profile.getId()));
                 result.add(lead);
             }
         }
@@ -256,6 +263,41 @@ public class HRManagementService {
         auditService.logCreate("TEAM_LEAD_APPOINTMENT", appointment.getId().toString(), appointedBy);
         
         return appointment;
+    }
+
+    /**
+     * Remove an active team lead appointment.
+     */
+    @Transactional
+    public void removeTeamLead(UUID employeeId, UUID removedBy, String reason) {
+        Profile employee = profileRepository.findById(employeeId)
+            .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
+
+        TeamLeadAppointment appointment = teamLeadRepository.findByEmployeeIdOrderByAppointedAtDesc(employeeId)
+            .stream()
+            .filter(a -> TeamLeadAppointment.STATUS_ACTING.equalsIgnoreCase(a.getStatus())
+                || TeamLeadAppointment.STATUS_CONFIRMED.equalsIgnoreCase(a.getStatus()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("No active team lead appointment found"));
+
+        appointment.setStatus(TeamLeadAppointment.STATUS_ENDED);
+        appointment.setEndedAt(OffsetDateTime.now());
+        appointment.setEndReason(reason);
+        teamLeadRepository.save(appointment);
+
+        employee.setIsTeamLead(false);
+        employee.setTeamLeadRequestStatus("none");
+        profileRepository.save(employee);
+
+        auditService.logUpdate(
+            "TEAM_LEAD_APPOINTMENT",
+            appointment.getId().toString(),
+            Map.of(
+                "status", "ended",
+                "reason", reason != null ? reason : ""
+            ),
+            removedBy
+        );
     }
 
     /**
@@ -373,6 +415,28 @@ public class HRManagementService {
             log.error("Failed to create team {}", name, e);
             throw e;
         }
+    }
+
+    private Double getCurrentTeamScore(UUID teamLeadId) {
+        if (teamLeadId == null) {
+            return null;
+        }
+        String quarter = getCurrentQuarter();
+        int year = LocalDate.now().getYear();
+        Optional<TeamQuarterlyScore> score = teamQuarterlyScoreRepository
+            .findByTeamLeadIdAndQuarterAndYear(teamLeadId, quarter, year);
+        return score
+            .map(TeamQuarterlyScore::getOverallTeamScore)
+            .map(value -> value != null ? value.doubleValue() : null)
+            .orElse(null);
+    }
+
+    private String getCurrentQuarter() {
+        int month = LocalDate.now().getMonthValue();
+        if (month <= 3) return "Q1";
+        if (month <= 6) return "Q2";
+        if (month <= 9) return "Q3";
+        return "Q4";
     }
 
     // =====================================================

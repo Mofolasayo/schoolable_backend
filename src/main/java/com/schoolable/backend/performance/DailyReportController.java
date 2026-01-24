@@ -211,6 +211,29 @@ public class DailyReportController {
         ));
     }
 
+    @Operation(summary = "Regrade a daily report (Admin)")
+    @PostMapping("/{id}/regrade")
+    public ResponseEntity<?> regradeReport(Authentication auth, @PathVariable Long id) {
+        if (!isAdmin(auth)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        Optional<DailyReport> reportOpt = dailyReportRepository.findById(id);
+        if (reportOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Report not found"));
+        }
+
+        DailyReport report = reportOpt.get();
+        var job = dailyReportAiService.enqueueAiGrading(report.getId(), report.getEmployeeId());
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "AI grading queued",
+            "reportId", report.getId(),
+            "jobId", job.getId()
+        ));
+    }
+
     // ==================== STATS ====================
 
     @Operation(summary = "Get my report stats")

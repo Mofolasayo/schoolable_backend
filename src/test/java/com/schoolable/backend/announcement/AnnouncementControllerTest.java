@@ -1,6 +1,7 @@
 package com.schoolable.backend.announcement;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolable.backend.notification.NotificationService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import org.junit.jupiter.api.Test;
@@ -52,6 +53,9 @@ class AnnouncementControllerTest {
 
     @MockBean
     private ProfileRepository profileRepository;
+
+    @MockBean
+    private NotificationService notificationService;
 
     @Test
     void getUnreadAnnouncements_filtersReadAndAudience() throws Exception {

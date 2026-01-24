@@ -120,11 +120,11 @@ public class WebSocketMessageController {
     /**
      * Broadcast announcement updates to all connected clients.
      */
-    public void broadcastAnnouncementUpdate(String action, Long announcementId, Map<String, Object> announcementData) {
+    public void broadcastAnnouncementUpdate(String action, UUID announcementId, Map<String, Object> announcementData) {
         Map<String, Object> notification = new HashMap<>();
         notification.put("type", "NOTIFICATION");
         notification.put("notificationType", "announcement_" + action);
-        notification.put("announcementId", announcementId);
+        notification.put("announcementId", announcementId.toString());
         notification.put("data", announcementData);
         notification.put("timestamp", System.currentTimeMillis());
 
@@ -137,6 +137,26 @@ public class WebSocketMessageController {
         }
 
         log.info("Announcement {} broadcast for announcement {}", action, announcementId);
+    }
+
+    /**
+     * Broadcast compliance updates to all connected clients.
+     */
+    public void broadcastComplianceUpdate(String action, UUID policyId, Map<String, Object> complianceData) {
+        Map<String, Object> notification = new HashMap<>();
+        notification.put("type", "NOTIFICATION");
+        notification.put("notificationType", "compliance_" + action);
+        notification.put("policyId", policyId.toString());
+        notification.put("data", complianceData);
+        notification.put("timestamp", System.currentTimeMillis());
+
+        messagingTemplate.convertAndSend("/topic/compliance", notification);
+
+        if (nativeWebSocketConfig != null) {
+            nativeWebSocketConfig.broadcastToTopic("/topic/compliance", notification);
+        }
+
+        log.info("Compliance {} broadcast for policy {}", action, policyId);
     }
 
     // Request DTOs

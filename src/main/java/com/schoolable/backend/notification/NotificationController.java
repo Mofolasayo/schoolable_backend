@@ -30,7 +30,7 @@ public class NotificationController {
             Authentication auth,
             @RequestBody RegisterDeviceRequest request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         
         DeviceToken token = notificationService.registerDevice(
             userId,
@@ -54,7 +54,7 @@ public class NotificationController {
             Authentication auth,
             @RequestBody UnregisterDeviceRequest request
     ) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         notificationService.unregisterDevice(userId, request.token());
 
         return ResponseEntity.ok(Map.of(
@@ -68,7 +68,7 @@ public class NotificationController {
      */
     @GetMapping
     public ResponseEntity<?> getNotifications(Authentication auth) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         
         List<NotificationHistory> notifications = notificationService.getNotificationHistory(userId);
         long unreadCount = notificationService.getUnreadCount(userId);
@@ -84,7 +84,7 @@ public class NotificationController {
      */
     @GetMapping("/unread-count")
     public ResponseEntity<?> getUnreadCount(Authentication auth) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         long count = notificationService.getUnreadCount(userId);
 
         return ResponseEntity.ok(Map.of("unreadCount", count));
@@ -109,7 +109,7 @@ public class NotificationController {
     @PostMapping("/mark-all-read")
     @Transactional
     public ResponseEntity<?> markAllAsRead(Authentication auth) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         notificationService.markAllAsRead(userId);
         return ResponseEntity.ok(Map.of("success", true));
     }
@@ -119,7 +119,7 @@ public class NotificationController {
      */
     @GetMapping("/devices")
     public ResponseEntity<?> getDevices(Authentication auth) {
-        UUID userId = UUID.fromString((String) auth.getPrincipal());
+        UUID userId = getUserId(auth);
         List<DeviceToken> devices = deviceTokenRepository.findByUserIdAndIsActiveTrue(userId);
 
         return ResponseEntity.ok(Map.of(
@@ -144,6 +144,17 @@ public class NotificationController {
         dto.put("readAt", n.getReadAt());
         dto.put("data", n.getData());
         return dto;
+    }
+
+    private UUID getUserId(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            throw new IllegalStateException("Unauthenticated");
+        }
+        Object principal = auth.getPrincipal();
+        if (principal instanceof UUID uuid) {
+            return uuid;
+        }
+        return UUID.fromString(principal.toString());
     }
 
     // Request DTOs

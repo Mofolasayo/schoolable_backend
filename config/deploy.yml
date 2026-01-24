@@ -30,6 +30,7 @@ env:
     SENTRY_ENVIRONMENT: "production"
     SENTRY_TRACES_SAMPLE_RATE: "0.1"
     SENTRY_TEST_ENABLED: <%= ENV.fetch("SENTRY_TEST_ENABLED", "false") %>
+    FCM_ENABLED: "true"
   secret:
     - SPRING_DATASOURCE_PASSWORD
     - JWT_SECRET
@@ -40,6 +41,8 @@ env:
     - GEMINI_API_KEY
     - SENTRY_DSN
     - SENTRY_TEST_TOKEN
+    - FCM_SERVICE_ACCOUNT_PATH
+    - FCM_SERVER_KEY
 
 readiness_delay: 15
 deploy_timeout: 120

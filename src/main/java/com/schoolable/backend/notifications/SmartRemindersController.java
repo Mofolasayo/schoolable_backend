@@ -33,6 +33,9 @@ public class SmartRemindersController {
     @Autowired
     private NotificationService notificationService;
 
+    @Autowired
+    private SmartReminderAudienceService audienceService;
+
     // ==================== GET ALL REMINDERS ====================
 
     @Operation(summary = "Get all smart reminders")
@@ -211,7 +214,7 @@ public class SmartRemindersController {
         SmartReminder reminder = optReminder.get();
         
         // Get targeted users based on targetAudience
-        List<UUID> targetUserIds = getTargetUserIds(reminder.getTargetAudience());
+        List<UUID> targetUserIds = audienceService.resolveTargetUserIds(reminder.getTargetAudience());
         
         if (!targetUserIds.isEmpty()) {
             // Send notifications to all targeted users
@@ -241,36 +244,6 @@ public class SmartRemindersController {
         ));
     }
     
-    /**
-     * Get target user IDs based on targetAudience setting.
-     */
-    private List<UUID> getTargetUserIds(String targetAudience) {
-        List<UUID> userIds = new ArrayList<>();
-        
-        if (targetAudience == null || targetAudience.isEmpty() || "all".equalsIgnoreCase(targetAudience)) {
-            // All active employees
-            profileRepository.findByStatus("active").forEach(p -> userIds.add(p.getId()));
-        } else if (targetAudience.startsWith("department:")) {
-            // Specific department
-            String department = targetAudience.substring("department:".length());
-            profileRepository.findByDepartment(department).forEach(p -> userIds.add(p.getId()));
-        } else if ("team_leads".equalsIgnoreCase(targetAudience)) {
-            // Only team leads
-            profileRepository.findByIsTeamLeadTrue().forEach(p -> userIds.add(p.getId()));
-        } else if (targetAudience.contains(",")) {
-            // Comma-separated list of user IDs
-            for (String idStr : targetAudience.split(",")) {
-                try {
-                    userIds.add(UUID.fromString(idStr.trim()));
-                } catch (Exception e) {
-                    // Skip invalid UUIDs
-                }
-            }
-        }
-        
-        return userIds;
-    }
-
     // ==================== HELPER METHODS ====================
 
     private Map<String, Object> buildReminderResponse(SmartReminder r) {

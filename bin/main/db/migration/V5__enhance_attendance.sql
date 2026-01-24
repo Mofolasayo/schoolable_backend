@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS office_locations (
 INSERT INTO office_locations (id, name, address, latitude, longitude, radius_meters)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
-    'Schoolable HQ',
+    'WorkSight HQ',
     'VGC, Lekki, Lagos, Nigeria',
     6.4427,
     3.4712,

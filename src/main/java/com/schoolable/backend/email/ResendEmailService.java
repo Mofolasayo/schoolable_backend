@@ -41,7 +41,7 @@ public class ResendEmailService {
                     {
                       "from": "%s",
                       "to": ["%s"],
-                      "subject": "Your Schoolable verification code",
+                      "subject": "Your WorkSight verification code",
                       "html": "%s"
                     }
                     """.formatted(escapeJson(from), escapeJson(to), html);
@@ -66,7 +66,7 @@ public class ResendEmailService {
 
     private String buildVerificationEmailHtml(String code) {
         // Keep it simple to avoid formatter issues with '%' characters
-        String html = "<p>Welcome to Schoolable!</p>"
+        String html = "<p>Welcome to WorkSight!</p>"
                 + "<p>Your verification code is:</p>"
                 + "<p style=\\\"font-size:22px; font-weight:bold; letter-spacing:4px;\\\">" + escapeJson(code) + "</p>"
                 + "<p>Enter this code in the app to verify your email.</p>";
@@ -84,7 +84,7 @@ public class ResendEmailService {
                     {
                       "from": "%s",
                       "to": ["%s"],
-                      "subject": "Reset your Schoolable password",
+                      "subject": "Reset your WorkSight password",
                       "html": "%s"
                     }
                     """.formatted(escapeJson(from), escapeJson(to), html);
@@ -108,7 +108,7 @@ public class ResendEmailService {
     }
 
     private String buildPasswordResetEmailHtml(String code) {
-        String html = "<p>You requested to reset your Schoolable password.</p>"
+        String html = "<p>You requested to reset your WorkSight password.</p>"
                 + "<p>Your reset code is:</p>"
                 + "<p style=\\\"font-size:22px; font-weight:bold; letter-spacing:4px;\\\">" + escapeJson(code) + "</p>"
                 + "<p>Enter this code in the app to reset your password.</p>"

@@ -6,6 +6,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.schoolable.backend.notification.NotificationService;
+import com.schoolable.backend.profile.Profile;
+import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.storage.StorageService;
 
 import java.time.LocalDate;
@@ -25,6 +28,12 @@ public class TrainingRecordController {
 
     @Autowired
     private StorageService storageService;
+
+    @Autowired
+    private NotificationService notificationService;
+
+    @Autowired
+    private ProfileRepository profileRepository;
 
     /**
      * Upload a new certificate (employee action)
@@ -78,6 +87,8 @@ public class TrainingRecordController {
             record.setCompletionDate(LocalDate.now());
 
             trainingRecordRepository.save(record);
+
+            notifyAdminsTrainingSubmitted(record);
 
             return ResponseEntity.ok(Map.of(
                 "message", "Certificate uploaded successfully. Pending admin approval.",
@@ -299,6 +310,8 @@ public class TrainingRecordController {
             
             trainingRecordRepository.save(record);
 
+            notifyEmployeeTrainingDecision(record, "approved");
+
             return ResponseEntity.ok(Map.of(
                 "message", "Certificate approved successfully",
                 "id", id
@@ -330,6 +343,8 @@ public class TrainingRecordController {
             
             trainingRecordRepository.save(record);
 
+            notifyEmployeeTrainingDecision(record, "rejected");
+
             return ResponseEntity.ok(Map.of(
                 "message", "Certificate rejected",
                 "id", id
@@ -339,5 +354,71 @@ public class TrainingRecordController {
                 "error", e.getMessage()
             ));
         }
+    }
+
+    private void notifyAdminsTrainingSubmitted(TrainingRecord record) {
+        List<UUID> adminIds = profileRepository.findAll().stream()
+            .filter(profile -> isAdminRole(profile.getRole()))
+            .filter(profile -> isActiveStatus(profile.getStatus()))
+            .map(Profile::getId)
+            .toList();
+
+        if (adminIds.isEmpty()) {
+            return;
+        }
+
+        String title = "Training Certificate";
+        String body = "A training certificate needs approval.";
+        Map<String, Object> data = new HashMap<>();
+        data.put("trainingId", record.getId());
+        data.put("action", "review_training");
+
+        notificationService.sendToUsers(
+            adminIds,
+            title,
+            body,
+            NotificationService.TYPE_PERFORMANCE,
+            record.getId() != null ? record.getId().toString() : null,
+            data
+        );
+    }
+
+    private void notifyEmployeeTrainingDecision(TrainingRecord record, String decision) {
+        if (record.getEmployeeId() == null) {
+            return;
+        }
+        String title = "Training Update";
+        String body = "Your training certificate was " + decision + ".";
+        Map<String, Object> data = new HashMap<>();
+        data.put("trainingId", record.getId());
+        data.put("action", "open_training");
+
+        notificationService.sendToUser(
+            record.getEmployeeId(),
+            title,
+            body,
+            NotificationService.TYPE_PERFORMANCE,
+            record.getId() != null ? record.getId().toString() : null,
+            data
+        );
+    }
+
+    private boolean isAdminRole(String role) {
+        if (role == null) {
+            return false;
+        }
+        String normalized = role.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("admin")
+            || normalized.equals("super_admin")
+            || normalized.equals("super admin")
+            || normalized.equals("superadmin");
+    }
+
+    private boolean isActiveStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return true;
+        }
+        String normalized = status.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("active") || normalized.equals("approved");
     }
 }

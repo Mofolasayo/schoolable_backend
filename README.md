@@ -1,10 +1,10 @@
-# Schoolable Backend (Java/Spring Boot)
+# WorkSight Backend (Java/Spring Boot)
 
 Seed project to replace Supabase with a Java service. Built with Spring Boot 3, Gradle, and Postgres.
 
 ## Structure
 - `build.gradle` – Spring Boot, Web, Security, Validation, JPA, Flyway, Postgres.
-- `src/main/java/com/schoolable/backend/SchoolableBackendApplication.java` – entry point.
+- `src/main/java/com/schoolable/backend/WorkSightBackendApplication.java` – entry point.
 - `src/main/resources/application.yml` – default config (Postgres + Flyway).
 
 ## Getting Started

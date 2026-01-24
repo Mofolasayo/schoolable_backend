@@ -14,5 +14,8 @@ build/
 # OS
 .DS_Store
 
+# Local env
+.env
+
 # Kamal
 .kamal/

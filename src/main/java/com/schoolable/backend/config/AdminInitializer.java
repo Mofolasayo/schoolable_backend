@@ -45,7 +45,7 @@ public class AdminInitializer {
                         Profile admin = new Profile();
                         admin.setId(UUID.randomUUID());
                         admin.setEmail(email);
-                        admin.setFullName("Schoolable Admin");
+                        admin.setFullName("WorkSight Admin");
                         admin.setRole("admin");
                         admin.setJobTitle("System Administrator");
                         admin.setStatus("active");

@@ -1,6 +1,7 @@
 package com.schoolable.backend.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolable.backend.notification.NotificationService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
 import com.schoolable.backend.storage.StorageService;
@@ -37,6 +38,7 @@ public class TaskController {
     private final TaskAssigneeRepository taskAssigneeRepository;
     private final ProfileRepository profileRepository;
     private final WebSocketMessageController webSocketController;
+    private final NotificationService notificationService;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
 
@@ -48,6 +50,7 @@ public class TaskController {
             TaskAssigneeRepository taskAssigneeRepository,
             ProfileRepository profileRepository,
             WebSocketMessageController webSocketController,
+            NotificationService notificationService,
             StorageService storageService,
             ObjectMapper objectMapper) {
         this.taskRepository = taskRepository;
@@ -57,6 +60,7 @@ public class TaskController {
         this.taskAssigneeRepository = taskAssigneeRepository;
         this.profileRepository = profileRepository;
         this.webSocketController = webSocketController;
+        this.notificationService = notificationService;
         this.storageService = storageService;
         this.objectMapper = objectMapper;
     }
@@ -385,6 +389,18 @@ public class TaskController {
         }
         webSocketController.broadcastTaskUpdate("created", task.getId(), taskResponse);
 
+        if (!assigneeIds.isEmpty()) {
+            String assignerName = creatorProfile != null && creatorProfile.getFullName() != null
+                ? creatorProfile.getFullName()
+                : "Your team lead";
+            for (UUID assigneeId : assigneeIds) {
+                if (assigneeId == null || assigneeId.equals(userId)) {
+                    continue;
+                }
+                notificationService.notifyTaskAssigned(assigneeId, task.getId(), task.getTitle(), assignerName);
+            }
+        }
+
         return ResponseEntity.ok(taskResponse);
     }
 
@@ -454,6 +470,23 @@ public class TaskController {
         if (assigneeIdsToSync != null) {
             syncTaskAssignees(task.getId(), assigneeIdsToSync, userId);
         }
+
+        boolean justCompleted = Task.TaskStatus.DONE.name().equals(task.getStatus())
+            && !Task.TaskStatus.DONE.name().equals(normalizeStatus(previousStatus));
+        if (justCompleted
+            && task.getCreatedBy() != null
+            && task.getAssigneeId() != null
+            && !task.getCreatedBy().equals(task.getAssigneeId())) {
+            String completedByName = profileRepository.findById(userId)
+                .map(Profile::getFullName)
+                .orElse("Task assignee");
+            notificationService.notifyTaskCompleted(
+                task.getCreatedBy(),
+                task.getId(),
+                task.getTitle(),
+                completedByName
+            );
+        }
         
         // Broadcast task update via WebSocket
         Map<String, Object> taskResponse = buildTaskResponse(task);
@@ -520,6 +553,23 @@ public class TaskController {
         }
 
         taskRepository.save(task);
+
+        boolean justCompleted = Task.TaskStatus.DONE.name().equals(nextStatus)
+            && !Task.TaskStatus.DONE.name().equals(normalizeStatus(oldStatus));
+        if (justCompleted
+            && task.getCreatedBy() != null
+            && task.getAssigneeId() != null
+            && !task.getCreatedBy().equals(task.getAssigneeId())) {
+            String completedByName = profileRepository.findById(userId)
+                .map(Profile::getFullName)
+                .orElse("Task assignee");
+            notificationService.notifyTaskCompleted(
+                task.getCreatedBy(),
+                task.getId(),
+                task.getTitle(),
+                completedByName
+            );
+        }
         
         // Broadcast task status update via WebSocket
         Map<String, Object> taskResponse = buildTaskResponse(task);

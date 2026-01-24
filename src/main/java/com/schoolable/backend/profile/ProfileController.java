@@ -79,12 +79,13 @@ public class ProfileController {
         }
         var p = profileOpt.get();
         boolean isComplete = p.getProfileCompletedAt() != null;
-        return ResponseEntity.ok(Map.of(
-            "is_complete", isComplete,
-            "profile_completed_at", isComplete ? p.getProfileCompletedAt().toString() : null,
-            "email", p.getEmail() != null ? p.getEmail() : "",
-            "full_name", p.getFullName() != null ? p.getFullName() : ""
-        ));
+        Map<String, Object> response = new HashMap<>();
+        response.put("is_complete", isComplete);
+        response.put("profile_completed_at",
+            isComplete ? p.getProfileCompletedAt().toString() : null);
+        response.put("email", p.getEmail() != null ? p.getEmail() : "");
+        response.put("full_name", p.getFullName() != null ? p.getFullName() : "");
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "List all profiles")

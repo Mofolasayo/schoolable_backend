@@ -1,7 +1,9 @@
 package com.schoolable.backend.announcement;
 
+import com.schoolable.backend.notification.NotificationService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import com.schoolable.backend.websocket.WebSocketMessageController;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
@@ -20,28 +22,31 @@ public class AnnouncementController {
     private final AnnouncementRepository announcementRepository;
     private final AnnouncementReadRepository announcementReadRepository;
     private final ProfileRepository profileRepository;
+    private final NotificationService notificationService;
+    private final WebSocketMessageController webSocketController;
 
     public AnnouncementController(
             AnnouncementRepository announcementRepository,
             AnnouncementReadRepository announcementReadRepository,
-            ProfileRepository profileRepository) {
+            ProfileRepository profileRepository,
+            NotificationService notificationService,
+            WebSocketMessageController webSocketController) {
         this.announcementRepository = announcementRepository;
         this.announcementReadRepository = announcementReadRepository;
         this.profileRepository = profileRepository;
+        this.notificationService = notificationService;
+        this.webSocketController = webSocketController;
     }
 
     @Operation(summary = "Get all active announcements for current user")
     @GetMapping
     public ResponseEntity<?> getAnnouncements(Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         // Get user's department for audience filtering
         var profileOpt = profileRepository.findById(userId);
         String userDepartment = profileOpt.map(Profile::getDepartment).orElse(null);
-        boolean isTeamLead = profileOpt.map(Profile::getIsTeamLead).orElse(false);
+        boolean isTeamLead = profileOpt.map(this::isTeamLeadProfile).orElse(false);
 
         // Get IDs of announcements the user has read
         Set<UUID> readIds = announcementReadRepository.findByUserId(userId)
@@ -73,15 +78,12 @@ public class AnnouncementController {
     @Operation(summary = "Get unread announcements for current user")
     @GetMapping("/unread")
     public ResponseEntity<?> getUnreadAnnouncements(Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         // Get user's department for audience filtering
         var profileOpt = profileRepository.findById(userId);
         String userDepartment = profileOpt.map(Profile::getDepartment).orElse(null);
-        boolean isTeamLead = profileOpt.map(Profile::getIsTeamLead).orElse(false);
+        boolean isTeamLead = profileOpt.map(this::isTeamLeadProfile).orElse(false);
 
         // Get IDs of announcements the user has read
         Set<UUID> readIds = announcementReadRepository.findByUserId(userId)
@@ -113,10 +115,7 @@ public class AnnouncementController {
     @Operation(summary = "Get a single announcement")
     @GetMapping("/{id}")
     public ResponseEntity<?> getAnnouncement(@PathVariable UUID id, Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         var announcementOpt = announcementRepository.findById(id);
         if (announcementOpt.isEmpty()) {
@@ -130,10 +129,7 @@ public class AnnouncementController {
     @Operation(summary = "Get list of users who read an announcement (admin or team lead)")
     @GetMapping("/{id}/reads")
     public ResponseEntity<?> getAnnouncementReads(@PathVariable UUID id, Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         var profileOpt = profileRepository.findById(userId);
         if (profileOpt.isEmpty()) {
@@ -141,8 +137,8 @@ public class AnnouncementController {
         }
 
         Profile profile = profileOpt.get();
-        boolean isAdmin = "admin".equalsIgnoreCase(profile.getRole());
-        boolean isTeamLead = profile.getIsTeamLead() != null && profile.getIsTeamLead();
+        boolean isAdmin = isAdminProfile(profile);
+        boolean isTeamLead = isTeamLeadProfile(profile);
         if (!isAdmin && !isTeamLead) {
             return ResponseEntity.status(403).body(Map.of("error", "Only admins and team leads can view readers"));
         }
@@ -188,10 +184,7 @@ public class AnnouncementController {
     @Operation(summary = "Create a new announcement (admin or team lead)")
     @PostMapping
     public ResponseEntity<?> createAnnouncement(@RequestBody CreateAnnouncementRequest req, Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         // Check if user is admin or team lead
         var profileOpt = profileRepository.findById(userId);
@@ -200,8 +193,8 @@ public class AnnouncementController {
         }
         
         var profile = profileOpt.get();
-        boolean isAdmin = "admin".equalsIgnoreCase(profile.getRole());
-        boolean isTeamLead = profile.getIsTeamLead() != null && profile.getIsTeamLead();
+        boolean isAdmin = isAdminProfile(profile);
+        boolean isTeamLead = isTeamLeadProfile(profile);
         
         if (!isAdmin && !isTeamLead) {
             return ResponseEntity.status(403).body(Map.of("error", "Only admins and team leads can create announcements"));
@@ -229,20 +222,41 @@ public class AnnouncementController {
 
         announcementRepository.save(announcement);
 
+        if (isPublishedNow(announcement)) {
+            List<UUID> recipients = resolveAudienceRecipients(audience);
+            if (!recipients.isEmpty()) {
+                String preview = buildPreview(announcement.getContent());
+                Map<String, Object> data = new HashMap<>();
+                data.put("announcementId", announcement.getId().toString());
+                data.put("action", "open_announcement");
+                notificationService.sendToUsers(
+                    recipients,
+                    "New Announcement",
+                    announcement.getTitle() + (preview != null ? ": " + preview : ""),
+                    NotificationService.TYPE_ANNOUNCEMENT,
+                    announcement.getId().toString(),
+                    data
+                );
+            }
+        }
+
+        webSocketController.broadcastAnnouncementUpdate(
+            "created",
+            announcement.getId(),
+            buildAnnouncementResponse(announcement, false)
+        );
+
         return ResponseEntity.ok(buildAnnouncementResponse(announcement, false));
     }
 
     @Operation(summary = "Update an announcement (admin only)")
     @PutMapping("/{id}")
     public ResponseEntity<?> updateAnnouncement(@PathVariable UUID id, @RequestBody CreateAnnouncementRequest req, Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         // Check if user is admin
         var profileOpt = profileRepository.findById(userId);
-        if (profileOpt.isEmpty() || !"admin".equalsIgnoreCase(profileOpt.get().getRole())) {
+        if (profileOpt.isEmpty() || !isAdminProfile(profileOpt.get())) {
             return ResponseEntity.status(403).body(Map.of("error", "Only admins can update announcements"));
         }
 
@@ -261,20 +275,23 @@ public class AnnouncementController {
 
         announcementRepository.save(announcement);
 
+        webSocketController.broadcastAnnouncementUpdate(
+            "updated",
+            announcement.getId(),
+            buildAnnouncementResponse(announcement, false)
+        );
+
         return ResponseEntity.ok(buildAnnouncementResponse(announcement, false));
     }
 
     @Operation(summary = "Delete an announcement (admin only)")
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteAnnouncement(@PathVariable UUID id, Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         // Check if user is admin
         var profileOpt = profileRepository.findById(userId);
-        if (profileOpt.isEmpty() || !"admin".equalsIgnoreCase(profileOpt.get().getRole())) {
+        if (profileOpt.isEmpty() || !isAdminProfile(profileOpt.get())) {
             return ResponseEntity.status(403).body(Map.of("error", "Only admins can delete announcements"));
         }
 
@@ -283,16 +300,19 @@ public class AnnouncementController {
         }
 
         announcementRepository.deleteById(id);
+
+        webSocketController.broadcastAnnouncementUpdate(
+            "deleted",
+            id,
+            Map.of("id", id.toString())
+        );
         return ResponseEntity.ok(Map.of("success", true));
     }
 
     @Operation(summary = "Mark an announcement as read")
     @PostMapping("/{id}/read")
     public ResponseEntity<?> markAsRead(@PathVariable UUID id, Authentication auth) {
-        if (auth == null || auth.getPrincipal() == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Unauthenticated"));
-        }
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = getUserId(auth);
 
         if (!announcementRepository.existsById(id)) {
             return ResponseEntity.status(404).body(Map.of("error", "Announcement not found"));
@@ -322,6 +342,91 @@ public class AnnouncementController {
 
     private boolean isTeamLeadAudience(String audience) {
         return "Team Leads".equalsIgnoreCase(audience) || "Team Lead".equalsIgnoreCase(audience);
+    }
+
+    private boolean isPublishedNow(Announcement announcement) {
+        if (announcement == null) {
+            return false;
+        }
+        String status = announcement.getStatus();
+        if (status == null) {
+            return true;
+        }
+        boolean published = "published".equalsIgnoreCase(status);
+        if (!published) {
+            return false;
+        }
+        OffsetDateTime scheduledAt = announcement.getScheduledAt();
+        return scheduledAt == null || !scheduledAt.isAfter(OffsetDateTime.now());
+    }
+
+    private List<UUID> resolveAudienceRecipients(String audience) {
+        if (audience == null || "All Staff".equalsIgnoreCase(audience)) {
+            return profileRepository.findByStatus("active").stream()
+                .map(Profile::getId)
+                .toList();
+        }
+        if (isTeamLeadAudience(audience)) {
+            return profileRepository.findByIsTeamLeadTrue().stream()
+                .filter(profile -> "active".equalsIgnoreCase(profile.getStatus()))
+                .map(Profile::getId)
+                .toList();
+        }
+        return profileRepository.findByDepartmentAndStatus(audience, "active").stream()
+            .map(Profile::getId)
+            .toList();
+    }
+
+    private String buildPreview(String content) {
+        if (content == null) {
+            return null;
+        }
+        String trimmed = content.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.length() <= 80) {
+            return trimmed;
+        }
+        return trimmed.substring(0, 77) + "...";
+    }
+
+    private boolean isAdminProfile(Profile profile) {
+        if (profile == null) {
+            return false;
+        }
+        String role = profile.getRole();
+        if (role == null) {
+            return false;
+        }
+        String normalized = role.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("admin") || normalized.equals("super_admin") || normalized.equals("super admin");
+    }
+
+    private boolean isTeamLeadProfile(Profile profile) {
+        if (profile == null) {
+            return false;
+        }
+        if (Boolean.TRUE.equals(profile.getIsTeamLead())) {
+            return true;
+        }
+        String role = profile.getRole();
+        if (role == null) {
+            return false;
+        }
+        String normalized = role.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("team_lead") || normalized.equals("team lead") || normalized.contains("team lead");
+    }
+
+    private UUID getUserId(Authentication auth) {
+        if (auth == null || auth.getPrincipal() == null) {
+            throw new IllegalStateException("Unauthenticated");
+        }
+        Object principal = auth.getPrincipal();
+        if (principal instanceof UUID) {
+            return (UUID) principal;
+        }
+        return UUID.fromString(principal.toString());
     }
 
     public record CreateAnnouncementRequest(

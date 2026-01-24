@@ -2,6 +2,15 @@ package com.schoolable.backend.notification;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.FirebaseOptions;
+import com.google.firebase.messaging.FirebaseMessaging;
+import com.google.firebase.messaging.FirebaseMessagingException;
+import com.google.firebase.messaging.Message;
+import com.google.firebase.messaging.Notification;
+import com.schoolable.backend.settings.UserPreference;
+import com.schoolable.backend.settings.UserPreferenceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +18,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.PostConstruct;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -18,8 +30,8 @@ import java.util.*;
 /**
  * Service for sending push notifications via FCM.
  * 
- * Note: For production, you should use the Firebase Admin SDK.
- * This implementation uses the FCM HTTP v1 API directly for simplicity.
+ * This implementation supports Firebase Admin SDK (HTTP v1) with
+ * a fallback to the legacy server key if configured.
  */
 @Service
 public class NotificationService {
@@ -35,11 +47,20 @@ public class NotificationService {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserPreferenceRepository userPreferenceRepository;
+
     @Value("${fcm.server-key:}")
     private String fcmServerKey;
 
     @Value("${fcm.enabled:false}")
     private boolean fcmEnabled;
+
+    @Value("${fcm.service-account-path:}")
+    private String fcmServiceAccountPath;
+
+    private FirebaseMessaging firebaseMessaging;
+    private boolean firebaseReady = false;
 
     // Notification type constants
     public static final String TYPE_TASK = "TASK";
@@ -51,6 +72,33 @@ public class NotificationService {
     public static final String TYPE_PEER_RATING = "PEER_RATING";
     public static final String TYPE_PERFORMANCE = "PERFORMANCE";
     public static final String TYPE_COMPLIANCE = "COMPLIANCE";
+
+    @PostConstruct
+    public void initFirebase() {
+        if (!fcmEnabled) {
+            return;
+        }
+        try {
+            FirebaseApp app = FirebaseApp.getApps().stream()
+                .filter(existing -> "schoolable".equals(existing.getName()))
+                .findFirst()
+                .orElse(null);
+
+            if (app == null) {
+                FirebaseOptions options = FirebaseOptions.builder()
+                    .setCredentials(loadCredentials())
+                    .build();
+                app = FirebaseApp.initializeApp(options, "schoolable");
+            }
+
+            firebaseMessaging = FirebaseMessaging.getInstance(app);
+            firebaseReady = true;
+            log.info("Firebase Admin initialized for push notifications.");
+        } catch (Exception e) {
+            firebaseReady = false;
+            log.warn("Firebase Admin initialization failed; will fallback to legacy if configured.", e);
+        }
+    }
 
     /**
      * Register a device token for push notifications.
@@ -100,11 +148,20 @@ public class NotificationService {
         }
         historyRepository.save(history);
 
+        if (!isPushEnabled(userId)) {
+            return;
+        }
+
         // Send push notification if enabled
-        if (fcmEnabled && fcmServerKey != null && !fcmServerKey.isEmpty()) {
+        if (fcmEnabled && firebaseReady) {
             List<String> tokens = deviceTokenRepository.findActiveTokensByUserId(userId);
             for (String token : tokens) {
-                sendFcmNotification(token, title, body, data);
+                sendFcmNotificationV1(token, title, body, data);
+            }
+        } else if (fcmEnabled && fcmServerKey != null && !fcmServerKey.isEmpty()) {
+            List<String> tokens = deviceTokenRepository.findActiveTokensByUserId(userId);
+            for (String token : tokens) {
+                sendFcmNotificationLegacy(token, title, body, data);
             }
         }
     }
@@ -216,11 +273,40 @@ public class NotificationService {
         historyRepository.markAllAsReadByUserId(userId);
     }
 
+    private void sendFcmNotificationV1(String token, String title, String body, Map<String, Object> data) {
+        if (!firebaseReady || firebaseMessaging == null) {
+            return;
+        }
+        try {
+            Notification.Builder notificationBuilder = Notification.builder()
+                .setTitle(title)
+                .setBody(body);
+
+            Message.Builder builder = Message.builder()
+                .setToken(token)
+                .setNotification(notificationBuilder.build());
+
+            if (data != null && !data.isEmpty()) {
+                Map<String, String> stringData = new HashMap<>();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    if (entry.getValue() != null) {
+                        stringData.put(entry.getKey(), String.valueOf(entry.getValue()));
+                    }
+                }
+                builder.putAllData(stringData);
+            }
+
+            firebaseMessaging.send(builder.build());
+        } catch (FirebaseMessagingException e) {
+            log.warn("FCM v1 notification failed: {}", e.getMessage());
+        }
+    }
+
     /**
-     * Send FCM notification (HTTP v1 legacy API).
-     * For production, use Firebase Admin SDK.
+     * Send FCM notification using legacy server key.
+     * For production, prefer Firebase Admin SDK.
      */
-    private void sendFcmNotification(String token, String title, String body, Map<String, Object> data) {
+    private void sendFcmNotificationLegacy(String token, String title, String body, Map<String, Object> data) {
         try {
             URL url = new URL("https://fcm.googleapis.com/fcm/send");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -231,19 +317,19 @@ public class NotificationService {
 
             Map<String, Object> message = new HashMap<>();
             message.put("to", token);
-            
+
             Map<String, Object> notification = new HashMap<>();
             notification.put("title", title);
             notification.put("body", body);
             notification.put("sound", "default");
             message.put("notification", notification);
-            
+
             if (data != null && !data.isEmpty()) {
                 message.put("data", data);
             }
 
             String jsonPayload = objectMapper.writeValueAsString(message);
-            
+
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(jsonPayload.getBytes());
                 os.flush();
@@ -252,7 +338,6 @@ public class NotificationService {
             int responseCode = conn.getResponseCode();
             if (responseCode != 200) {
                 log.warn("FCM notification failed with code: {}", responseCode);
-                // Could mark token as invalid if 404
                 if (responseCode == 404) {
                     deviceTokenRepository.deactivateToken(token);
                 }
@@ -262,5 +347,29 @@ public class NotificationService {
         } catch (Exception e) {
             log.warn("Failed to send FCM notification: {}", e.getMessage());
         }
+    }
+
+    private boolean isPushEnabled(UUID userId) {
+        try {
+            Optional<UserPreference> pref = userPreferenceRepository.findById(userId);
+            if (pref.isPresent()) {
+                Boolean enabled = pref.get().getPushNotifications();
+                if (enabled != null && !enabled) {
+                    return false;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check push preference; defaulting to enabled.", e);
+        }
+        return true;
+    }
+
+    private GoogleCredentials loadCredentials() throws IOException {
+        if (fcmServiceAccountPath != null && !fcmServiceAccountPath.isBlank()) {
+            try (FileInputStream serviceAccount = new FileInputStream(fcmServiceAccountPath)) {
+                return GoogleCredentials.fromStream(serviceAccount);
+            }
+        }
+        return GoogleCredentials.getApplicationDefault();
     }
 }

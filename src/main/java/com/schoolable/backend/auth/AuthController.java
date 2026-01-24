@@ -312,7 +312,7 @@ public ResponseEntity<?> debugToken(@RequestParam("token") String token) {
                 <html lang="en">
                 <head><meta charset="UTF-8"><title>Verification</title></head>
                 <body style="font-family: Arial, sans-serif; padding: 24px;">
-                <h2>Schoolable</h2>
+                <h2>WorkSight</h2>
                 <p>%s</p>
                 </body>
                 </html>

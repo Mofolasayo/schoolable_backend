@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Schoolable AI-Powered KPI System enables Team Leads to set custom KPIs for their teams, track weekly progress, and receive AI-generated insights powered by Google's Gemini AI.
+The WorkSight AI-Powered KPI System enables Team Leads to set custom KPIs for their teams, track weekly progress, and receive AI-generated insights powered by Google's Gemini AI.
 
 ## Architecture
 

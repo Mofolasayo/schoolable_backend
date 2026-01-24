@@ -122,6 +122,32 @@ public class HRManagementController {
     }
 
     /**
+     * Remove an active team lead appointment.
+     */
+    @PostMapping("/team-leads/{employeeId}/remove")
+    public ResponseEntity<?> removeTeamLead(
+            Authentication auth,
+            @PathVariable UUID employeeId,
+            @RequestBody(required = false) Map<String, Object> request
+    ) {
+        UUID userId = getUserId(auth);
+        String reason = request != null ? (String) request.get("reason") : null;
+
+        try {
+            hrService.removeTeamLead(employeeId, userId, reason);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Team lead removed"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", e.getMessage()
+            ));
+        }
+    }
+
+    /**
      * Get pending team lead requests.
      */
     @GetMapping("/team-leads/requests")

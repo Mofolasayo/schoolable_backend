@@ -1,0 +1,56 @@
+service: schoolable-backend
+image: mofolasayo/schoolable_backend
+
+servers:
+  web:
+    - <%= ENV.fetch("HETZNER_HOST") %>
+
+ssh:
+  user: deploy
+  keys:
+    - <%= ENV.fetch("KAMAL_SSH_KEY", "~/.ssh/id_rsa") %>
+
+registry:
+  server: ghcr.io
+  username: <%= ENV.fetch("KAMAL_REGISTRY_USERNAME") %>
+  password: <%= ENV.fetch("KAMAL_REGISTRY_PASSWORD") %>
+
+builder:
+  arch: amd64
+  driver: docker
+  context: .
+
+env:
+  clear:
+    PORT: "8081"
+    SPRING_DATASOURCE_URL: "jdbc:postgresql://<%= ENV.fetch(\"HETZNER_DB_HOST\") %>:5432/schoolable"
+    SPRING_DATASOURCE_USERNAME: "schoolable"
+    RESEND_FROM: "hello@getdebby.co"
+    APP_CORS_ALLOWED_ORIGINS: "https://api.<%= ENV.fetch(\"HETZNER_HOST\") %>.sslip.io,https://admin.<%= ENV.fetch(\"HETZNER_HOST\") %>.sslip.io,https://team.<%= ENV.fetch(\"HETZNER_HOST\") %>.sslip.io,http://localhost:3000,http://localhost:3001"
+    SENTRY_ENVIRONMENT: "production"
+    SENTRY_TRACES_SAMPLE_RATE: "0.1"
+    SENTRY_TEST_ENABLED: <%= ENV.fetch("SENTRY_TEST_ENABLED", "false") %>
+    FCM_ENABLED: "true"
+  secret:
+    - SPRING_DATASOURCE_PASSWORD
+    - JWT_SECRET
+    - RESEND_API_KEY
+    - CLOUDINARY_CLOUD_NAME
+    - CLOUDINARY_API_KEY
+    - CLOUDINARY_API_SECRET
+    - GEMINI_API_KEY
+    - SENTRY_DSN
+    - SENTRY_TEST_TOKEN
+    - FCM_SERVICE_ACCOUNT_PATH
+    - FCM_SERVER_KEY
+
+readiness_delay: 15
+deploy_timeout: 120
+
+proxy:
+  app_port: 8081
+  ssl: true
+  hosts:
+    - api.<%= ENV.fetch("HETZNER_HOST") %>.sslip.io
+  healthcheck:
+    path: /up

@@ -1,7 +1,9 @@
 package com.schoolable.backend.compliance;
 
+import com.schoolable.backend.notification.NotificationService;
 import com.schoolable.backend.profile.Profile;
 import com.schoolable.backend.profile.ProfileRepository;
+import com.schoolable.backend.websocket.WebSocketMessageController;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,14 +18,20 @@ public class ComplianceService {
     private final CompliancePolicyRepository policyRepository;
     private final ComplianceSubmissionRepository submissionRepository;
     private final ProfileRepository profileRepository;
+    private final NotificationService notificationService;
+    private final WebSocketMessageController webSocketController;
     
     public ComplianceService(
             CompliancePolicyRepository policyRepository,
             ComplianceSubmissionRepository submissionRepository,
-            ProfileRepository profileRepository) {
+            ProfileRepository profileRepository,
+            NotificationService notificationService,
+            WebSocketMessageController webSocketController) {
         this.policyRepository = policyRepository;
         this.submissionRepository = submissionRepository;
         this.profileRepository = profileRepository;
+        this.notificationService = notificationService;
+        this.webSocketController = webSocketController;
     }
     
     // ==================== POLICY MANAGEMENT (Admin) ====================
@@ -57,6 +65,13 @@ public class ComplianceService {
         
         // Create pending submissions for all applicable users
         createPendingSubmissionsForPolicy(savedPolicy);
+
+        notifyPolicyCreated(savedPolicy);
+
+        Map<String, Object> createPayload = new HashMap<>();
+        createPayload.put("policyId", savedPolicy.getId().toString());
+        createPayload.put("title", savedPolicy.getTitle());
+        webSocketController.broadcastComplianceUpdate("created", savedPolicy.getId(), createPayload);
         
         return savedPolicy;
     }
@@ -77,7 +92,12 @@ public class ComplianceService {
                     policy.setDeadline(updatedPolicy.getDeadline());
                     policy.setReviewFrequencyDays(updatedPolicy.getReviewFrequencyDays());
                     policy.setIsActive(updatedPolicy.getIsActive());
-                    return policyRepository.save(policy);
+                    CompliancePolicy saved = policyRepository.save(policy);
+                    Map<String, Object> updatePayload = new HashMap<>();
+                    updatePayload.put("policyId", saved.getId().toString());
+                    updatePayload.put("title", saved.getTitle());
+                    webSocketController.broadcastComplianceUpdate("updated", saved.getId(), updatePayload);
+                    return saved;
                 })
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
     }
@@ -87,6 +107,9 @@ public class ComplianceService {
         policyRepository.findById(id).ifPresent(policy -> {
             policy.setIsActive(false);
             policyRepository.save(policy);
+            Map<String, Object> deletePayload = new HashMap<>();
+            deletePayload.put("policyId", policy.getId().toString());
+            webSocketController.broadcastComplianceUpdate("deleted", policy.getId(), deletePayload);
         });
     }
     
@@ -120,6 +143,8 @@ public class ComplianceService {
                 item.put("description", policy.getDescription());
                 item.put("type", policy.getType());
                 item.put("category", policy.getCategory());
+                item.put("fileUrl", policy.getFileUrl());
+                item.put("fileName", policy.getFileName());
                 item.put("deadline", policy.getDeadline());
                 item.put("status", status);
                 item.put("submissionId", submission.map(ComplianceSubmission::getId).orElse(null));
@@ -161,8 +186,19 @@ public class ComplianceService {
         }
         
         submission.setSubmittedAt(OffsetDateTime.now());
+
+        ComplianceSubmission saved = submissionRepository.save(submission);
+
+        if ("submitted".equalsIgnoreCase(saved.getStatus())) {
+            notifyAdminsComplianceSubmission(saved);
+        }
+
+        Map<String, Object> submitPayload = new HashMap<>();
+        submitPayload.put("policyId", policy.getId().toString());
+        submitPayload.put("status", saved.getStatus());
+        webSocketController.broadcastComplianceUpdate("submitted", policy.getId(), submitPayload);
         
-        return submissionRepository.save(submission);
+        return saved;
     }
     
     // ==================== ADMIN TRACKING ====================
@@ -255,7 +291,19 @@ public class ComplianceService {
                     submission.setReviewedBy(reviewerId);
                     submission.setReviewedAt(OffsetDateTime.now());
                     submission.setReviewNotes(notes);
-                    return submissionRepository.save(submission);
+                    ComplianceSubmission saved = submissionRepository.save(submission);
+                    notifySubmissionOutcome(saved);
+                    if (saved.getPolicy() != null && saved.getPolicy().getId() != null) {
+                        Map<String, Object> reviewPayload = new HashMap<>();
+                        reviewPayload.put("policyId", saved.getPolicy().getId().toString());
+                        reviewPayload.put("status", saved.getStatus());
+                        webSocketController.broadcastComplianceUpdate(
+                            "reviewed",
+                            saved.getPolicy().getId(),
+                            reviewPayload
+                        );
+                    }
+                    return saved;
                 })
                 .orElseThrow(() -> new RuntimeException("Submission not found"));
     }
@@ -286,5 +334,123 @@ public class ComplianceService {
                 submissionRepository.save(submission);
             }
         }
+    }
+
+    private void notifyPolicyCreated(CompliancePolicy policy) {
+        if (policy == null) {
+            return;
+        }
+
+        List<UUID> recipients = resolvePolicyRecipients(policy);
+        if (recipients.isEmpty()) {
+            return;
+        }
+
+        String title = "New Compliance";
+        String body = policy.getTitle() != null ? policy.getTitle() : "A new compliance item is available";
+        Map<String, Object> data = new HashMap<>();
+        data.put("policyId", policy.getId().toString());
+        data.put("action", "open_compliance");
+
+        notificationService.sendToUsers(
+            recipients,
+            title,
+            body,
+            NotificationService.TYPE_COMPLIANCE,
+            policy.getId().toString(),
+            data
+        );
+    }
+
+    private void notifyAdminsComplianceSubmission(ComplianceSubmission submission) {
+        List<UUID> adminIds = findAdminIds();
+        if (adminIds.isEmpty()) {
+            return;
+        }
+
+        String title = "Compliance Submission";
+        String body = "A compliance submission needs review.";
+        Map<String, Object> data = new HashMap<>();
+        if (submission.getId() != null) {
+            data.put("submissionId", submission.getId().toString());
+        }
+        if (submission.getPolicy() != null && submission.getPolicy().getId() != null) {
+            data.put("policyId", submission.getPolicy().getId().toString());
+        }
+        data.put("action", "review_compliance");
+
+        notificationService.sendToUsers(
+            adminIds,
+            title,
+            body,
+            NotificationService.TYPE_COMPLIANCE,
+            submission.getId() != null ? submission.getId().toString() : null,
+            data
+        );
+    }
+
+    private void notifySubmissionOutcome(ComplianceSubmission submission) {
+        if (submission == null || submission.getUserId() == null) {
+            return;
+        }
+
+        String status = submission.getStatus() != null ? submission.getStatus().toLowerCase(Locale.ROOT) : "";
+        String title = "Compliance Update";
+        String body = "Your compliance submission was " + status + ".";
+        Map<String, Object> data = new HashMap<>();
+        if (submission.getPolicy() != null && submission.getPolicy().getId() != null) {
+            data.put("policyId", submission.getPolicy().getId().toString());
+        }
+        data.put("action", "open_compliance");
+
+        notificationService.sendToUser(
+            submission.getUserId(),
+            title,
+            body,
+            NotificationService.TYPE_COMPLIANCE,
+            submission.getId() != null ? submission.getId().toString() : null,
+            data
+        );
+    }
+
+    private List<UUID> resolvePolicyRecipients(CompliancePolicy policy) {
+        List<Profile> applicableProfiles;
+        if (policy.getDepartment() != null && !policy.getDepartment().isEmpty()) {
+            applicableProfiles = profileRepository.findByDepartment(policy.getDepartment());
+        } else {
+            applicableProfiles = profileRepository.findAll();
+        }
+        return applicableProfiles.stream()
+            .filter(profile -> !isAdminRole(profile.getRole()))
+            .filter(profile -> isActiveStatus(profile.getStatus()))
+            .map(Profile::getId)
+            .toList();
+    }
+
+    private List<UUID> findAdminIds() {
+        return profileRepository.findAll().stream()
+            .filter(profile -> isAdminRole(profile.getRole()))
+            .filter(profile -> isActiveStatus(profile.getStatus()))
+            .map(Profile::getId)
+            .toList();
+    }
+
+    private boolean isAdminRole(String role) {
+        if (role == null) {
+            return false;
+        }
+        String normalized = role.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("admin")
+            || normalized.equals("super_admin")
+            || normalized.equals("super admin")
+            || normalized.equals("superadmin");
+    }
+
+    private boolean isActiveStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return true;
+        }
+        String normalized = status.toLowerCase(Locale.ROOT).trim();
+        return normalized.equals("active") || normalized.equals("approved");
     }
 }
