@@ -20,6 +20,10 @@ spring:
     # Allow out-of-order migrations and clean up on validation errors
     out-of-order: true
     validate-on-migrate: true
+  data:
+    redis:
+      repositories:
+        enabled: false
   servlet:
     multipart:
       enabled: true
